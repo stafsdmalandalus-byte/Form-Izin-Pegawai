@@ -1,0 +1,1139 @@
+# MASTER PROMPT PEMBUATAN APLIKASI WEB
+# SISTEM INFORMASI PERMOHONAN IZIN DAN CUTI PEGAWAI
+## PESANTREN ISLAM INTERNASIONAL AL-ANDALUS
+
+## A. PERAN DAN TUGAS ANDA
+
+Bertindaklah sebagai Senior Full-Stack Developer, Software Architect, Database Engineer, UI/UX Designer, Google Apps Script Developer, dan System Analyst.
+
+Saya ingin membuat aplikasi berbasis web untuk mengelola seluruh proses permohonan izin dan cuti pegawai di Pesantren Islam Internasional Al-Andalus.
+
+Aplikasi ini harus benar-benar berfungsi dan dapat digunakan untuk operasional lembaga, bukan sekadar prototype, mockup, atau desain tampilan.
+
+Bangun aplikasi mulai dari frontend, backend, database, autentikasi, alur persetujuan, tanda tangan digital, hingga pembuatan dokumen PDF.
+
+Jangan hanya memberikan contoh kode. Implementasikan seluruh fitur dan buat struktur proyek yang dapat dijalankan.
+
+---
+
+# B. IDENTITAS APLIKASI
+
+Nama aplikasi:
+
+**SISTEM INFORMASI PERMOHONAN IZIN DAN CUTI PEGAWAI**
+
+Organisasi:
+
+PESANTREN ISLAM INTERNASIONAL AL-ANDALUS
+
+Pengelola:
+
+DIVISI SDM & PENJAMINAN MUTU
+
+Tujuan aplikasi:
+
+1. Mempermudah pegawai mengajukan izin dan cuti.
+2. Mempermudah atasan dalam memeriksa permohonan.
+3. Mempermudah Mudir Unit memberikan persetujuan.
+4. Memudahkan SDM melakukan monitoring dan pengarsipan.
+5. Mengurangi penggunaan formulir manual.
+6. Memastikan seluruh permohonan tercatat dalam database.
+7. Mempermudah pencarian riwayat izin dan cuti pegawai.
+8. Menghasilkan dokumen PDF resmi yang dapat diunduh dan dicetak.
+
+---
+
+# C. ARSITEKTUR DAN TEKNOLOGI
+
+Gunakan teknologi berikut:
+
+| Komponen | Teknologi |
+|---|---|
+| AI pembangun aplikasi | Google AI Studio |
+| Frontend | React.js |
+| Bahasa pemrograman | TypeScript |
+| Styling | Tailwind CSS |
+| Database | Google Sheets |
+| Backend | Google Apps Script |
+| Penyimpanan dokumen | Google Drive |
+| Pembuatan PDF | Google Docs / Google Apps Script |
+| Hosting backend | Google Apps Script Web App |
+| Hosting frontend | Hosting web yang mendukung aplikasi React |
+
+PENTING:
+
+1. Jangan menggunakan Firebase.
+2. Jangan menggunakan Firestore.
+3. Jangan menggunakan Firebase Authentication.
+4. Jangan menggunakan Firebase Storage.
+5. Google Sheets harus menjadi database utama.
+6. Google Apps Script menjadi penghubung antara frontend, database, dan Google Drive.
+7. Semua proses pengolahan data dilakukan melalui backend.
+8. Jangan menghubungkan frontend langsung ke Google Sheets menggunakan kredensial rahasia.
+9. Jangan menanamkan password atau secret key dalam kode frontend.
+10. Gunakan Google Drive untuk menyimpan dokumen dan gambar tanda tangan.
+
+Buat aplikasi dengan struktur frontend dan backend yang terpisah tetapi saling terintegrasi.
+
+---
+
+# D. PEMBUATAN DATABASE OTOMATIS
+
+Ini merupakan salah satu persyaratan utama.
+
+Saya tidak ingin membuat Google Spreadsheet dan sheet satu per satu secara manual.
+
+Buat fungsi Google Apps Script bernama:
+
+`setupDatabase()`
+
+Ketika fungsi dijalankan pertama kali, sistem harus otomatis:
+
+1. Membuat Google Spreadsheet database.
+2. Memberikan nama:
+
+   `DATABASE SISTEM IZIN DAN CUTI PEGAWAI AL-ANDALUS`
+
+3. Membuat seluruh sheet database.
+4. Membuat header kolom secara otomatis.
+5. Mengatur format tanggal.
+6. Mengatur format nomor permohonan.
+7. Membuat folder Google Drive untuk dokumen.
+8. Membuat folder khusus tanda tangan.
+9. Membuat folder arsip PDF.
+10. Menyimpan ID Spreadsheet dan ID folder Drive ke Script Properties.
+
+Buat mekanisme agar setup tidak membuat database baru setiap kali dijalankan.
+
+Jika database sudah tersedia, sistem harus menggunakan database yang sudah ada.
+
+Buat menu konfigurasi awal agar Admin dapat mengetahui apakah database sudah berhasil dibuat.
+
+Jika terjadi kesalahan saat setup, tampilkan pesan kesalahan yang jelas.
+
+---
+
+# E. STRUKTUR GOOGLE SPREADSHEET
+
+Buat satu file Google Spreadsheet dengan sheet berikut.
+
+## 1. MASTER_PEGAWAI
+
+Digunakan untuk menyimpan seluruh data pegawai.
+
+Kolom:
+
+- ID Pegawai
+- NIP
+- Nama Lengkap
+- Jenis Kelamin
+- Bidang
+- Bagian
+- Jabatan
+- Unit
+- Email
+- Nomor Telepon
+- ID Atasan Langsung
+- ID Mudir Unit
+- Status Kepegawaian
+- Status Aktif
+- Tanggal Dibuat
+- Tanggal Diperbarui
+
+## 2. USERS
+
+Digunakan untuk mengatur akun pengguna dan hak akses.
+
+Kolom:
+
+- User ID
+- ID Pegawai
+- Nama Pengguna
+- Email
+- Role
+- Unit
+- ID Atasan
+- ID Mudir
+- Status Akun
+- Tanggal Dibuat
+- Terakhir Login
+
+## 3. PERMOHONAN
+
+Digunakan untuk menyimpan seluruh permohonan izin dan cuti.
+
+Kolom:
+
+- ID Permohonan
+- Nomor Permohonan
+- ID Pegawai
+- Nama Pegawai
+- Bidang
+- Bagian
+- Jabatan
+- Unit
+- Jenis Permohonan
+- Kategori Keperluan
+- Tanggal Mulai
+- Tanggal Selesai
+- Jumlah Hari
+- Alasan
+- Keterangan Tambahan
+- Lampiran
+- Tanggal Pengajuan
+- Status Permohonan
+- Status Atasan
+- Status Mudir
+- Catatan Atasan
+- Catatan Mudir
+- Catatan SDM
+- URL PDF
+- Tanggal Disetujui
+- Tanggal Diarsipkan
+
+## 4. KETENTUAN_IZIN_CUTI
+
+Digunakan untuk menyimpan ketentuan izin dan cuti.
+
+Kolom:
+
+- ID Kategori
+- Nama Keperluan
+- Durasi
+- Minimal Pengajuan
+- Keterangan
+- Status Aktif
+- Tanggal Diperbarui
+
+## 5. PERSETUJUAN
+
+Digunakan untuk menyimpan riwayat persetujuan.
+
+Kolom:
+
+- ID Persetujuan
+- ID Permohonan
+- Nama Penyetuju
+- Email Penyetuju
+- Role Penyetuju
+- Keputusan
+- Catatan
+- URL Tanda Tangan
+- Waktu Persetujuan
+
+## 6. NOTIFIKASI
+
+Kolom:
+
+- ID Notifikasi
+- User ID
+- Email Penerima
+- Judul
+- Pesan
+- ID Permohonan
+- Status Dibaca
+- Waktu Dibuat
+
+## 7. ARSIP_DOKUMEN
+
+Kolom:
+
+- ID Dokumen
+- ID Permohonan
+- Nomor Permohonan
+- Nama Pegawai
+- Nama File
+- URL Google Drive
+- Jenis Dokumen
+- Tanggal Arsip
+
+## 8. LOG_AKTIVITAS
+
+Kolom:
+
+- ID Log
+- User ID
+- Nama Pengguna
+- Aktivitas
+- Modul
+- ID Referensi
+- Keterangan
+- Waktu Aktivitas
+
+## 9. PENGATURAN
+
+Digunakan untuk konfigurasi aplikasi.
+
+Kolom:
+
+- Nama Pengaturan
+- Nilai
+- Keterangan
+- Tanggal Diperbarui
+
+---
+
+# F. DATABASE PEGAWAI DAN IMPOR EXCEL
+
+Buat menu khusus:
+
+**MASTER DATA PEGAWAI**
+
+Admin SDM dapat:
+
+1. Menambahkan pegawai.
+2. Mengedit data pegawai.
+3. Menonaktifkan pegawai.
+4. Mencari pegawai berdasarkan nama.
+5. Memfilter berdasarkan bidang.
+6. Memfilter berdasarkan unit.
+7. Melihat daftar pegawai.
+8. Mengimpor data pegawai dari Excel.
+9. Mengunduh template Excel.
+10. Mengekspor data pegawai ke Excel.
+
+Buat template Excel dengan kolom yang sesuai dengan sheet `MASTER_PEGAWAI`.
+
+Ketika admin mengunggah Excel:
+
+- Sistem membaca isi file.
+- Sistem menampilkan pratinjau data.
+- Sistem memeriksa kolom wajib.
+- Sistem memeriksa duplikasi NIP.
+- Sistem memeriksa data kosong.
+- Sistem memberikan laporan jika ada data yang tidak valid.
+- Admin dapat mengonfirmasi proses impor.
+
+Jangan langsung memasukkan data yang belum lolos validasi.
+
+Data pegawai yang sudah masuk ke database akan digunakan secara otomatis oleh formulir permohonan.
+
+Jangan membuat nama pegawai fiktif.
+
+Jika data pegawai belum diimpor, tampilkan petunjuk bahwa Admin SDM harus memasukkan data terlebih dahulu.
+
+---
+
+# G. ROLE DAN HAK AKSES PENGGUNA
+
+Buat lima role pengguna.
+
+## 1. PEGAWAI
+
+Pegawai dapat:
+
+- Login.
+- Melihat profil sendiri.
+- Membuat permohonan izin/cuti.
+- Melihat ketentuan izin/cuti.
+- Mengisi alasan permohonan.
+- Mengunggah lampiran jika diperlukan.
+- Menandatangani permohonan.
+- Mengirim permohonan.
+- Melihat status permohonan.
+- Melihat riwayat pengajuan.
+- Melihat catatan revisi.
+- Mengunduh PDF yang sudah disetujui.
+
+Pegawai tidak boleh melihat data permohonan pegawai lain.
+
+## 2. ATASAN LANGSUNG / KEPALA BIDANG
+
+Atasan dapat:
+
+- Melihat permohonan pegawai di bawah tanggung jawabnya.
+- Melihat detail pengajuan.
+- Memeriksa ketentuan izin/cuti.
+- Menyetujui permohonan.
+- Menolak permohonan.
+- Meminta revisi.
+- Mengisi catatan.
+- Menandatangani persetujuan.
+- Melihat riwayat permohonan yang diproses.
+
+## 3. MUDIR UNIT
+
+Mudir dapat:
+
+- Melihat permohonan yang sudah disetujui atasan.
+- Memeriksa detail permohonan.
+- Menyetujui permohonan.
+- Menolak permohonan.
+- Meminta revisi.
+- Memberikan tanda tangan digital.
+- Melihat riwayat persetujuan.
+
+## 4. ADMIN SDM & PENJAMINAN MUTU
+
+Admin SDM dapat:
+
+- Melihat seluruh permohonan.
+- Mengelola data pegawai.
+- Mengimpor Excel.
+- Mengelola akun pengguna.
+- Mengatur atasan langsung.
+- Mengatur Mudir Unit.
+- Mengelola ketentuan izin/cuti.
+- Memantau seluruh proses.
+- Melihat dokumen PDF.
+- Mengunduh dokumen.
+- Mengelola arsip.
+- Mengekspor laporan.
+- Melihat log aktivitas.
+
+## 5. SUPER ADMIN
+
+Super Admin memiliki hak akses penuh untuk mengelola konfigurasi aplikasi, database, akun, dan seluruh pengaturan sistem.
+
+PENTING:
+
+Hak akses harus divalidasi di backend.
+
+Jangan hanya menyembunyikan menu berdasarkan role.
+
+---
+
+# H. SISTEM LOGIN DAN AUTENTIKASI
+
+Buat halaman login yang profesional.
+
+Identitas pengguna harus terhubung dengan data pada sheet `USERS`.
+
+Utamakan autentikasi menggunakan identitas akun Google yang terverifikasi jika lingkungan Google Workspace mendukungnya.
+
+Jika menggunakan autentikasi berbasis email dan password, implementasikan penyimpanan password yang aman dengan hashing dan mekanisme sesi yang tervalidasi.
+
+Jangan pernah menyimpan password dalam bentuk teks biasa.
+
+Sediakan proses:
+
+1. Admin membuat akun pengguna.
+2. Akun dihubungkan dengan ID Pegawai.
+3. Role ditentukan oleh Admin.
+4. Pengguna login.
+5. Backend memeriksa identitas dan role.
+6. Pengguna diarahkan ke dashboard sesuai role.
+
+Jangan mengizinkan pengguna mendaftarkan diri dan menentukan role sendiri.
+
+Jelaskan batasan autentikasi Google Apps Script dan konfigurasi deployment yang diperlukan agar identitas pengguna benar-benar dapat diverifikasi.
+
+---
+
+# I. FORMULIR PENGAJUAN IZIN/CUTI
+
+Buat menu:
+
+**BUAT PERMOHONAN BARU**
+
+Formulir harus sederhana dan mudah digunakan.
+
+Data yang ditampilkan:
+
+1. Nama pegawai.
+2. NIP.
+3. Bidang.
+4. Bagian.
+5. Jabatan.
+6. Unit.
+7. Jenis permohonan.
+8. Kategori keperluan.
+9. Tanggal mulai.
+10. Tanggal selesai.
+11. Jumlah hari.
+12. Alasan.
+13. Keterangan tambahan.
+14. Lampiran jika diperlukan.
+15. Tanda tangan digital pemohon.
+
+Data identitas pegawai harus terisi otomatis berdasarkan akun yang sedang login.
+
+Pegawai tidak perlu mengetik ulang nama, NIP, bidang, dan jabatan.
+
+Sediakan pilihan jenis permohonan:
+
+- Izin.
+- Cuti.
+- Izin Kondisional/Khusus.
+
+Setelah pegawai memilih kategori keperluan, tampilkan ketentuan durasi dan minimal pengajuan.
+
+Hitung jumlah hari secara otomatis.
+
+Jangan mengubah ketentuan yang ada di spreadsheet.
+
+Jika terdapat kategori yang memerlukan kebijaksanaan atau pemeriksaan manual, berikan peringatan kepada pengguna.
+
+Sediakan fitur simpan draft sebelum permohonan dikirim.
+
+Sebelum mengirim, tampilkan halaman konfirmasi berisi seluruh data yang akan diajukan.
+
+---
+
+# J. KETENTUAN IZIN/CUTI
+
+Gunakan file Excel yang saya lampirkan:
+
+`Ketentuan_Izin_Cuti_Pegawai.xlsx`
+
+Baca sheet `Ketentuan Izin Cuti`.
+
+Gunakan data berikut sebagai data awal database.
+
+| No | Keperluan Izin/Cuti | Durasi | Pengajuan Minimal |
+|---|---|---|---|
+| 1 | Pernikahan Pegawai | 5 Hari | 3 hari sebelumnya |
+| 2 | Pernikahan Anak Pegawai | 3 Hari | 3 hari sebelumnya |
+| 3 | Pernikahan Ayah / Ibu Pegawai | 2 Hari | 3 hari sebelumnya |
+| 4 | Pernikahan Saudara Kandung / Tiri / Cucu | 2 Hari | 3 hari sebelumnya |
+| 5 | Pernikahan Paman / Bibi / Ipar / Sepupu / Keponakan | 1 Hari | 3 hari sebelumnya |
+| 6 | Istri Melahirkan (bagi Suami) | 3 Hari | Saat kejadian |
+| 7 | Khitanan / Aqiqah Anak | 1 Hari | 3 hari sebelumnya |
+| 8 | Kematian Suami / Istri / Orang Tua / Mertua / Anak | 3 Hari | Saat kejadian |
+| 9 | Kematian Saudara Kandung / Tiri / Cucu | 2 Hari | Saat kejadian |
+| 10 | Kematian Kakek / Nenek / Paman / Bibi / Ipar | 1 Hari | Saat kejadian |
+| 11 | Kematian Orang yang Tinggal Serumah | 1 Hari | Saat kejadian |
+| 12 | Menjenguk Orang Tua Opname di RS | 1 Hari | 1 hari sebelumnya |
+| 13 | Menunggu Istri / Anak Opname di RS | Kebijaksanaan | 1 hari sebelumnya |
+| 14 | Hamil & Melahirkan (Pegawai Wanita) | 3 Bulan (1,5 bulan sebelum & sesudah) | 2 bulan sebelum HPL |
+| 15 | Ibadah Haji | Pelaksanaan + 8 Hari (3 hari sebelum & 5 hari sesudah) | 14 hari sebelumnya (masa kerja min. 2 thn) |
+| 16 | Keguguran | Sesuai sakit umum | Sesuai kondisi medis |
+
+ATURAN PENTING:
+
+1. Jangan mengubah nama kategori.
+2. Jangan mengubah durasi.
+3. Jangan mengubah minimal pengajuan.
+4. Jangan membuat ketentuan tambahan yang tidak terdapat dalam dokumen.
+5. Jangan mengarang ketentuan sakit umum.
+6. Untuk durasi kebijaksanaan, sistem tidak boleh menentukan jumlah hari secara otomatis.
+7. Untuk kategori yang memerlukan pemeriksaan medis, sistem harus meminta pemeriksaan manual.
+8. Untuk Izin Kondisional/Khusus, sediakan penjelasan dan pemeriksaan khusus.
+9. Semua perubahan kebijakan hanya dapat dilakukan oleh Admin SDM yang berwenang.
+10. Catat perubahan ketentuan di log aktivitas.
+
+---
+
+# K. ALUR PERSETUJUAN PERMOHONAN
+
+Alur persetujuan harus berurutan:
+
+PEGAWAI → ATASAN LANGSUNG → MUDIR UNIT → ADMIN SDM.
+
+## TAHAP 1: PEGAWAI
+
+Pegawai:
+
+1. Login.
+2. Membuka formulir.
+3. Mengisi permohonan.
+4. Memeriksa data.
+5. Menandatangani secara digital.
+6. Mengirim permohonan.
+
+Status menjadi:
+
+MENUNGGU PERSETUJUAN ATASAN.
+
+## TAHAP 2: ATASAN LANGSUNG
+
+Atasan mendapatkan notifikasi.
+
+Atasan dapat memilih:
+
+- SETUJUI.
+- TOLAK.
+- MINTA REVISI.
+
+Jika disetujui:
+
+- Atasan memberikan tanda tangan digital.
+- Sistem menyimpan identitas dan waktu persetujuan.
+- Status berubah menjadi MENUNGGU PERSETUJUAN MUDIR.
+
+Jika ditolak:
+
+- Atasan wajib memberikan alasan.
+- Status berubah menjadi DITOLAK ATASAN.
+- Pegawai mendapatkan notifikasi.
+
+Jika revisi:
+
+- Atasan wajib memberikan catatan.
+- Permohonan dikembalikan kepada pegawai.
+- Pegawai dapat memperbaiki dan mengirim ulang.
+
+## TAHAP 3: MUDIR UNIT
+
+Mudir mendapatkan notifikasi setelah permohonan disetujui atasan.
+
+Mudir dapat memilih:
+
+- SETUJUI.
+- TOLAK.
+- MINTA REVISI.
+
+Jika disetujui:
+
+- Mudir memberikan tanda tangan digital.
+- Sistem menyimpan identitas dan waktu persetujuan.
+- Status menjadi DISETUJUI.
+
+Jika ditolak:
+
+- Mudir wajib memberikan alasan.
+- Status menjadi DITOLAK MUDIR.
+
+Jika revisi:
+
+- Permohonan dikembalikan kepada pegawai dengan catatan revisi.
+
+## TAHAP 4: ADMIN SDM
+
+Setelah Mudir menyetujui:
+
+1. Admin SDM mendapatkan notifikasi.
+2. Permohonan masuk ke daftar permohonan yang telah disetujui.
+3. Sistem menghasilkan PDF final.
+4. PDF disimpan di Google Drive.
+5. URL PDF dicatat di Google Spreadsheet.
+6. Admin SDM dapat mengarsipkan permohonan.
+7. Pegawai dapat mengunduh PDF.
+
+Admin SDM bertugas melakukan pencatatan dan pengarsipan, bukan menggantikan persetujuan atasan atau Mudir.
+
+---
+
+# L. TANDA TANGAN DIGITAL
+
+Buat fitur tanda tangan digital yang dapat digunakan melalui mouse maupun layar sentuh.
+
+Tanda tangan dilakukan oleh tiga pihak:
+
+1. Pemohon.
+2. Atasan Langsung.
+3. Mudir Unit.
+
+Setiap tanda tangan:
+
+- Disimpan dalam bentuk PNG.
+- Disimpan di Google Drive.
+- Terhubung dengan ID pengguna.
+- Memiliki waktu tanda tangan.
+- Memiliki identitas penandatangan.
+- Dicatat dalam sheet `PERSETUJUAN`.
+
+Jangan mengizinkan pengguna memberikan tanda tangan atas nama orang lain.
+
+Jangan mengizinkan pengguna mengganti tanda tangan pihak lain.
+
+Sediakan fitur hapus dan ulangi tanda tangan sebelum dikirim atau sebelum persetujuan dikonfirmasi.
+
+Setelah persetujuan selesai, tanda tangan harus menjadi bagian dari rekam dokumen yang telah disetujui.
+
+---
+
+# M. PEMBUATAN DOKUMEN PDF RESMI
+
+Gunakan file DOCX yang saya lampirkan:
+
+`AIS-FRM-SEK.02.11. Form Izin atau Cuti Pegawai-Rev 1.docx`
+
+Dokumen tersebut merupakan formulir resmi Pesantren Islam Internasional Al-Andalus.
+
+FORMULIR ASLI WAJIB DIPERTAHANKAN.
+
+Jangan membuat desain formulir baru.
+
+Jangan mengubah:
+
+- Logo.
+- Kop surat.
+- Nama lembaga.
+- Judul formulir.
+- Kode dokumen.
+- Terbit/Revisi.
+- Tanggal terbit.
+- Nomor halaman.
+- Ukuran kertas.
+- Margin.
+- Garis tabel.
+- Tata letak.
+- Jenis huruf.
+- Ukuran huruf.
+- Posisi kolom.
+- Posisi tanda tangan.
+- Redaksi catatan formulir.
+
+Formulir asli terdiri dari satu halaman dan harus tetap satu halaman.
+
+Bagian yang boleh diisi secara otomatis:
+
+| Bagian | Data |
+|---|---|
+| Nama | Nama pegawai |
+| Bidang/Bagian | Bidang atau bagian pegawai |
+| Hari/Tanggal Cuti/Izin | Tanggal mulai dan selesai |
+| Alasan Cuti/Izin | Alasan permohonan |
+| Pemohon | Tanda tangan pegawai |
+| Mengetahui | Tanda tangan atasan langsung |
+| Menyetujui | Tanda tangan Mudir Unit |
+
+Proses pembuatan PDF:
+
+1. Setelah Mudir memberikan persetujuan, sistem mengambil data permohonan.
+2. Sistem mengambil template formulir resmi.
+3. Sistem mengisi data dinamis.
+4. Sistem memasukkan ketiga tanda tangan.
+5. Sistem menghasilkan PDF.
+6. Sistem menyimpan PDF ke Google Drive.
+7. Sistem mencatat URL PDF ke spreadsheet.
+8. Sistem menyediakan tombol Pratinjau PDF.
+9. Sistem menyediakan tombol Download PDF.
+10. Sistem menyediakan tombol Cetak.
+
+Nama file:
+
+`AIS-IZC-2026-0001_Nama-Pegawai.pdf`
+
+Nomor permohonan harus dibuat otomatis dan unik.
+
+PENTING:
+
+Gunakan DOCX asli sebagai sumber template.
+
+Jika diperlukan, lakukan konversi ke Google Docs untuk proses pengisian otomatis, tetapi wajib memeriksa hasil konversi agar tidak merusak format.
+
+Jika metode pengisian Google Docs tidak mampu mempertahankan layout secara akurat, gunakan metode lain seperti pengisian field atau overlay PDF yang mempertahankan desain asli.
+
+Jangan menyatakan PDF sudah sesuai sebelum hasilnya benar-benar diperiksa.
+
+---
+
+# N. FITUR DASHBOARD
+
+Buat dashboard yang berbeda sesuai role.
+
+## DASHBOARD PEGAWAI
+
+Tampilkan:
+
+- Total pengajuan.
+- Menunggu persetujuan.
+- Disetujui.
+- Ditolak.
+- Perlu revisi.
+- Riwayat pengajuan.
+- Tombol Permohonan Baru.
+
+## DASHBOARD ATASAN
+
+Tampilkan:
+
+- Pengajuan menunggu persetujuan.
+- Total disetujui.
+- Total ditolak.
+- Total revisi.
+- Daftar permohonan terbaru.
+
+## DASHBOARD MUDIR
+
+Tampilkan:
+
+- Pengajuan menunggu persetujuan Mudir.
+- Total disetujui.
+- Total ditolak.
+- Total revisi.
+- Daftar permohonan terbaru.
+
+## DASHBOARD ADMIN SDM
+
+Tampilkan:
+
+- Total pegawai.
+- Total pengajuan.
+- Menunggu persetujuan atasan.
+- Menunggu persetujuan Mudir.
+- Disetujui.
+- Ditolak.
+- Perlu revisi.
+- Total izin/cuti bulan ini.
+- Grafik pengajuan per bulan.
+- Grafik berdasarkan bidang.
+- Rekap jenis izin/cuti.
+- Daftar permohonan terbaru.
+
+Sediakan filter berdasarkan:
+
+- Tanggal.
+- Bulan.
+- Tahun.
+- Bidang.
+- Unit.
+- Jenis permohonan.
+- Status.
+
+---
+
+# O. NOTIFIKASI
+
+Buat notifikasi dalam aplikasi.
+
+Notifikasi harus diberikan ketika:
+
+1. Pegawai mengirim permohonan.
+2. Atasan menerima permohonan baru.
+3. Atasan menyetujui.
+4. Atasan menolak.
+5. Atasan meminta revisi.
+6. Mudir menerima permohonan.
+7. Mudir menyetujui.
+8. Mudir menolak.
+9. Mudir meminta revisi.
+10. Permohonan selesai.
+11. PDF tersedia.
+12. Admin SDM menerima permohonan untuk diarsipkan.
+
+Notifikasi harus dikirim kepada pengguna yang benar sesuai role dan hubungan organisasi.
+
+Buat ikon lonceng notifikasi dengan jumlah pesan yang belum dibaca.
+
+Jika memungkinkan, tambahkan notifikasi email menggunakan Google Apps Script MailApp.
+
+---
+
+# P. ARSIP DAN LAPORAN
+
+Buat menu:
+
+**ARSIP PERMOHONAN**
+
+Fitur:
+
+- Cari berdasarkan nama pegawai.
+- Cari berdasarkan nomor permohonan.
+- Filter tanggal.
+- Filter bidang.
+- Filter unit.
+- Filter kategori izin/cuti.
+- Filter status.
+- Lihat detail.
+- Pratinjau PDF.
+- Download PDF.
+- Cetak dokumen.
+
+Buat menu:
+
+**LAPORAN DAN REKAPITULASI**
+
+Sediakan ekspor:
+
+- Excel.
+- PDF.
+
+Kolom laporan:
+
+- Nomor permohonan.
+- Nama pegawai.
+- NIP.
+- Bidang/Bagian.
+- Jenis permohonan.
+- Kategori.
+- Tanggal mulai.
+- Tanggal selesai.
+- Jumlah hari.
+- Tanggal pengajuan.
+- Status.
+- Atasan yang menyetujui.
+- Mudir yang menyetujui.
+
+Sediakan filter berdasarkan periode dan unit kerja.
+
+---
+
+# Q. DESAIN TAMPILAN
+
+Buat UI/UX dengan desain modern, profesional, dan formal.
+
+Identitas visual:
+
+- Hijau tua sebagai warna utama.
+- Putih sebagai warna latar.
+- Abu-abu sebagai warna pendukung.
+- Gunakan logo Pesantren Islam Internasional Al-Andalus.
+- Tampilan bersih dan tidak terlalu ramai.
+- Gunakan ikon yang konsisten.
+
+Layout:
+
+- Sidebar navigasi.
+- Header dengan nama pengguna.
+- Area konten utama.
+- Kartu statistik.
+- Tabel data.
+- Formulir yang mudah digunakan.
+- Halaman detail permohonan.
+- Halaman notifikasi.
+
+Aplikasi harus responsif untuk:
+
+- Laptop.
+- Desktop.
+- Tablet.
+- Smartphone.
+
+Gunakan bahasa Indonesia untuk seluruh menu.
+
+---
+
+# R. KEAMANAN DATABASE DAN SISTEM
+
+Terapkan keamanan berikut:
+
+1. Pegawai hanya dapat melihat permohonannya sendiri.
+2. Atasan hanya dapat melihat permohonan pegawai yang berada dalam kewenangannya.
+3. Mudir hanya dapat melihat permohonan yang menjadi kewenangannya.
+4. Admin SDM dapat mengakses seluruh data operasional.
+5. Super Admin dapat mengatur sistem.
+6. Pengguna tidak boleh mengubah status persetujuan secara langsung.
+7. Pengguna tidak boleh memalsukan tanda tangan.
+8. Semua perubahan penting dicatat.
+9. Spreadsheet database tidak dibagikan secara bebas kepada seluruh pegawai.
+10. Akses database hanya melalui backend.
+11. Gunakan validasi server-side.
+12. Gunakan LockService untuk mencegah duplikasi nomor permohonan dan konflik penulisan data.
+13. Gunakan ID unik untuk setiap permohonan.
+14. Validasi kepemilikan file sebelum mengizinkan download.
+15. Jangan menampilkan URL dokumen privat kepada pengguna yang tidak berwenang.
+
+Jangan menganggap menyembunyikan tombol di frontend sudah cukup untuk mengamankan aplikasi.
+
+---
+
+# S. STRUKTUR FUNGSI GOOGLE APPS SCRIPT
+
+Buat backend yang terorganisasi.
+
+Minimal sediakan fungsi:
+
+## Database
+
+- setupDatabase()
+- getDatabase()
+- createSheetIfNotExists()
+- initializeSettings()
+
+## Pegawai
+
+- getEmployees()
+- getEmployeeById()
+- addEmployee()
+- updateEmployee()
+- deactivateEmployee()
+- importEmployees()
+
+## Pengguna
+
+- authenticateUser()
+- getCurrentUser()
+- createUser()
+- updateUserRole()
+- validatePermission()
+
+## Permohonan
+
+- createLeaveRequest()
+- getLeaveRequests()
+- getLeaveRequestById()
+- updateLeaveRequest()
+- submitLeaveRequest()
+- generateRequestNumber()
+
+## Persetujuan
+
+- approveBySupervisor()
+- rejectBySupervisor()
+- requestRevisionBySupervisor()
+- approveByMudir()
+- rejectByMudir()
+- requestRevisionByMudir()
+
+## Tanda Tangan
+
+- saveSignature()
+- getSignature()
+- validateSignatureOwner()
+
+## PDF
+
+- generateLeavePDF()
+- getPDFUrl()
+- archivePDF()
+
+## Notifikasi
+
+- createNotification()
+- getNotifications()
+- markNotificationAsRead()
+- sendEmailNotification()
+
+## Laporan
+
+- getDashboardStatistics()
+- generateReport()
+- exportToExcel()
+- exportToPDF()
+
+## Log
+
+- recordActivity()
+- getActivityLogs()
+
+Buat pemisahan file kode yang rapi, misalnya:
+
+- Code.gs
+- Database.gs
+- Authentication.gs
+- Employees.gs
+- LeaveRequests.gs
+- Approvals.gs
+- Signatures.gs
+- PDFGenerator.gs
+- Notifications.gs
+- Reports.gs
+- Security.gs
+- Utilities.gs
+
+Nama file dapat disesuaikan selama struktur tetap terorganisasi.
+
+---
+
+# T. PENGUJIAN SISTEM
+
+Sebelum menyatakan aplikasi selesai, lakukan pengujian menyeluruh.
+
+Uji skenario:
+
+1. Database berhasil dibuat.
+2. Seluruh sheet tersedia.
+3. Header sesuai spesifikasi.
+4. Data pegawai berhasil diimpor.
+5. Akun pegawai berhasil dibuat.
+6. Pegawai berhasil login.
+7. Profil otomatis terisi.
+8. Pegawai berhasil mengajukan izin/cuti.
+9. Data masuk ke spreadsheet.
+10. Atasan menerima notifikasi.
+11. Atasan berhasil menyetujui.
+12. Tanda tangan atasan tersimpan.
+13. Mudir menerima notifikasi.
+14. Mudir berhasil menyetujui.
+15. Tanda tangan Mudir tersimpan.
+16. PDF berhasil dibuat.
+17. PDF tersimpan di Google Drive.
+18. PDF berhasil diunduh.
+19. Format PDF tetap sesuai formulir asli.
+20. Admin SDM dapat melihat arsip.
+21. Laporan dapat diekspor.
+22. Pegawai tidak dapat melihat data orang lain.
+23. Role tidak dapat melakukan tindakan di luar kewenangannya.
+
+Jika terdapat fitur yang belum berhasil, tampilkan keterangannya secara jujur.
+
+Jangan mengganti fitur yang belum berfungsi dengan simulasi.
+
+---
+
+# U. TAHAPAN PEMBANGUNAN
+
+Bangun aplikasi melalui tahapan berikut:
+
+TAHAP 1:
+Buat struktur proyek dan desain UI.
+
+TAHAP 2:
+Buat backend Google Apps Script.
+
+TAHAP 3:
+Buat database Google Spreadsheet secara otomatis.
+
+TAHAP 4:
+Buat sistem login dan role pengguna.
+
+TAHAP 5:
+Buat master data pegawai dan impor Excel.
+
+TAHAP 6:
+Buat formulir pengajuan izin/cuti.
+
+TAHAP 7:
+Buat alur persetujuan atasan dan Mudir.
+
+TAHAP 8:
+Buat tanda tangan digital.
+
+TAHAP 9:
+Buat sistem pembuatan PDF resmi.
+
+TAHAP 10:
+Buat dashboard, notifikasi, laporan, dan arsip.
+
+TAHAP 11:
+Lakukan pengujian dan perbaikan.
+
+Jangan berhenti setelah menyelesaikan desain frontend.
+
+---
+
+# V. HASIL YANG HARUS DIBERIKAN
+
+Saya menginginkan hasil berupa:
+
+1. Aplikasi web lengkap.
+2. Source code frontend.
+3. Source code Google Apps Script.
+4. Database Google Spreadsheet yang dibuat otomatis.
+5. Struktur seluruh sheet.
+6. Folder Google Drive untuk penyimpanan.
+7. Sistem login dan role.
+8. Sistem pengajuan izin/cuti.
+9. Sistem persetujuan.
+10. Sistem tanda tangan digital.
+11. Sistem PDF.
+12. Fitur download PDF.
+13. Dashboard.
+14. Arsip dan laporan.
+15. Dokumentasi instalasi.
+16. Panduan deployment.
+17. Panduan penggunaan aplikasi.
+
+Jika ada bagian yang memerlukan konfigurasi manual, berikan instruksi langkah demi langkah.
+
+Jangan membuat URL, ID Spreadsheet, ID Folder, email, atau kredensial palsu.
+
+Jangan menyatakan aplikasi sudah terhubung sebelum integrasi benar-benar berhasil.
+
+---
+
+# INSTRUKSI PENUTUP
+
+Bangun aplikasi ini sebagai sistem administrasi resmi Pesantren Islam Internasional Al-Andalus.
+
+Prioritas paling penting:
+
+1. Google Sheets benar-benar menjadi database.
+2. Database dibuat otomatis oleh Google Apps Script.
+3. Data pegawai bisa diimpor dari Excel.
+4. Proses pengajuan berjalan dengan benar.
+5. Persetujuan atasan dan Mudir berjalan berurutan.
+6. Tanda tangan digital tersimpan.
+7. PDF resmi dapat dibuat dan diunduh.
+8. Format PDF sama dengan formulir resmi.
+9. Admin SDM dapat melakukan monitoring dan pengarsipan.
+10. Sistem aman dan dapat digunakan oleh banyak pegawai.
+
+Mulailah membangun aplikasi sekarang.
+
+Jangan hanya memberikan konsep, penjelasan, atau rancangan. Buat implementasi nyata, tulis seluruh kode yang diperlukan, dan pastikan frontend serta backend dapat terhubung.
+
+Jika pengerjaan terlalu besar untuk satu tahap, kerjakan secara bertahap tanpa menghilangkan fitur yang sudah ditentukan.

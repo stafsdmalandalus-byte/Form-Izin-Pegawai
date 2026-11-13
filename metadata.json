@@ -1,0 +1,6 @@
+{
+  "name": "Sistem Informasi Permohonan Izin dan Cuti Pegawai Al-Andalus",
+  "description": "Sistem Informasi Permohonan Izin dan Cuti Pegawai Pesantren Islam Internasional Al-Andalus oleh Divisi SDM & Penjaminan Mutu, terintegrasi dengan Google Sheets, Google Apps Script, dan Google Drive.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
