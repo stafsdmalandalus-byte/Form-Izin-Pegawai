@@ -106,6 +106,16 @@ export interface LeaveRequest {
   waktuTtdPemohon?: string;
   waktuTtdAtasan?: string;
   waktuTtdMudir?: string;
+  // Pendelegasian Tugas / Pegawai Pengganti (Badal / Inval)
+  idPegawaiPengganti?: string;
+  namaPegawaiPengganti?: string;
+  noWaPegawaiPengganti?: string;
+  catatanDelegasiTugas?: string;
+}
+
+export interface PesantrenHoliday {
+  tanggal: string; // YYYY-MM-DD
+  keterangan: string;
 }
 
 export interface ApprovalRecord {

@@ -7,6 +7,7 @@ import {
   Employee,
   LeavePolicy,
   LeaveRequest,
+  PesantrenHoliday,
   SystemSetting,
   UserAccount,
   UserRole,
@@ -1101,3 +1102,219 @@ export const getVisibleLeaveRequests = (
 };
 
 export const getTimestamp = nowStr;
+
+// ============================================================================
+// KALENDER HARI LIBUR RESMI PESANTREN (TIDAK MEMOTONG KUOTA CUTI 12 HARI)
+// ============================================================================
+export const DEFAULT_PESANTREN_HOLIDAYS: PesantrenHoliday[] = [
+  { tanggal: '2026-03-20', keterangan: 'Cuti Bersama & Libur Idul Fitri 1447 H' },
+  { tanggal: '2026-03-21', keterangan: 'Hari Raya Idul Fitri 1447 H (1 Syawal)' },
+  { tanggal: '2026-03-22', keterangan: 'Libur Hari Raya Idul Fitri 1447 H (2 Syawal)' },
+  { tanggal: '2026-05-27', keterangan: 'Hari Raya Idul Adha 1447 H (10 Dzulhijjah)' },
+  { tanggal: '2026-05-28', keterangan: 'Hari Tasyrik Idul Adha 1447 H' },
+  { tanggal: '2026-06-16', keterangan: 'Tahun Baru Islam 1448 Hijriah (1 Muharram)' },
+  { tanggal: '2026-08-17', keterangan: 'Hari Kemerdekaan Republik Indonesia' },
+];
+
+export const getPesantrenHolidays = (store: FullDatabaseStore): PesantrenHoliday[] => {
+  const setting = (store.PENGATURAN || []).find(
+    (s) => s.namaPengaturan === 'DAFTAR_HARI_LIBUR_PESANTREN'
+  );
+  if (setting && setting.nilai) {
+    try {
+      const parsed = JSON.parse(setting.nilai);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((h) => h && h.tanggal);
+      }
+    } catch {
+      // fallback
+    }
+  }
+  return DEFAULT_PESANTREN_HOLIDAYS;
+};
+
+export const savePesantrenHolidays = (
+  store: FullDatabaseStore,
+  holidays: PesantrenHoliday[],
+  actor: UserAccount
+): FullDatabaseStore => {
+  const ts = nowStr();
+  const sorted = [...holidays].sort((a, b) => a.tanggal.localeCompare(b.tanggal));
+  const jsonStr = JSON.stringify(sorted);
+  const existingIdx = store.PENGATURAN.findIndex(
+    (s) => s.namaPengaturan === 'DAFTAR_HARI_LIBUR_PESANTREN'
+  );
+
+  const nextSettings = [...store.PENGATURAN];
+  if (existingIdx >= 0) {
+    nextSettings[existingIdx] = {
+      ...nextSettings[existingIdx],
+      nilai: jsonStr,
+      tanggalDiperbarui: ts,
+    };
+  } else {
+    nextSettings.push({
+      namaPengaturan: 'DAFTAR_HARI_LIBUR_PESANTREN',
+      nilai: jsonStr,
+      keterangan:
+        'Daftar tanggal libur resmi / hari raya Pesantren yang tidak memotong kuota cuti tahunan 12 hari',
+      tanggalDiperbarui: ts,
+    });
+  }
+
+  const nextStore: FullDatabaseStore = {
+    ...store,
+    PENGATURAN: nextSettings,
+  };
+
+  recordActivity(
+    nextStore,
+    actor,
+    'UPDATE_KALENDER_LIBUR_PESANTREN',
+    'PENGATURAN',
+    'DAFTAR_HARI_LIBUR_PESANTREN',
+    `Memperbarui daftar hari libur resmi pesantren (${sorted.length} tanggal libur terdaftar).`
+  );
+
+  saveDatabase(nextStore);
+  return nextStore;
+};
+
+/**
+ * Menghitung hari efektif izin/cuti dengan mengecualikan tanggal merah / Hari Libur Resmi Pesantren
+ * agar tidak memotong kuota cuti tahunan 12 hari.
+ */
+export const calculateEffectiveLeaveDays = (
+  tanggalMulai: string,
+  tanggalSelesai: string,
+  holidays: PesantrenHoliday[]
+): {
+  valid: boolean;
+  totalCalendarDays: number;
+  effectiveDays: number;
+  skippedHolidays: PesantrenHoliday[];
+} => {
+  if (!tanggalMulai || !tanggalSelesai) {
+    return { valid: false, totalCalendarDays: 0, effectiveDays: 0, skippedHolidays: [] };
+  }
+  const start = new Date(`${tanggalMulai}T00:00:00`);
+  const end = new Date(`${tanggalSelesai}T00:00:00`);
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || end < start) {
+    return { valid: false, totalCalendarDays: 0, effectiveDays: 0, skippedHolidays: [] };
+  }
+
+  const holidayMap = new Map<string, PesantrenHoliday>();
+  holidays.forEach((h) => {
+    if (h.tanggal) holidayMap.set(h.tanggal.trim(), h);
+  });
+
+  let totalCalendarDays = 0;
+  const skippedHolidays: PesantrenHoliday[] = [];
+  const cursor = new Date(start);
+
+  while (cursor <= end && totalCalendarDays < 366) {
+    totalCalendarDays++;
+    const yyyy = cursor.getFullYear();
+    const mm = String(cursor.getMonth() + 1).padStart(2, '0');
+    const dd = String(cursor.getDate()).padStart(2, '0');
+    const iso = `${yyyy}-${mm}-${dd}`;
+    const matchedHoliday = holidayMap.get(iso);
+    if (matchedHoliday) {
+      skippedHolidays.push(matchedHoliday);
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  const effectiveDays = Math.max(0, totalCalendarDays - skippedHolidays.length);
+  return {
+    valid: true,
+    totalCalendarDays,
+    effectiveDays,
+    skippedHolidays,
+  };
+};
+
+// ============================================================================
+// UPLOAD OTOMATIS FILE PDF KE FOLDER GOOGLE DRIVE "Arsip izin ISO" VIA GAS
+// ============================================================================
+export const uploadPdfToGasDriveFolder = async (
+  store: FullDatabaseStore,
+  request: LeaveRequest,
+  pdfBase64: string,
+  fileName: string
+): Promise<{
+  ok: boolean;
+  fileUrl: string;
+  folderUrl: string;
+  message: string;
+  updatedStore: FullDatabaseStore;
+}> => {
+  const gasUrl = (store.status?.gasWebAppUrl || '').trim();
+  const folderUrl = ARSIP_IZIN_ISO_FOLDER_URL;
+
+  if (!gasUrl || !gasUrl.startsWith('https://script.google.com/')) {
+    return {
+      ok: false,
+      fileUrl: folderUrl,
+      folderUrl,
+      message:
+        'Tautan folder Arsip izin ISO telah ditautkan. Untuk upload otomatis file PDF ke dalam Google Drive, pastikan URL Web App Google Apps Script telah terhubung di menu Google Sheets & Koneksi.',
+      updatedStore: store,
+    };
+  }
+
+  try {
+    const res = await fetch(gasUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8',
+      },
+      body: JSON.stringify({
+        action: 'uploadPdfArchive',
+        folderId: ARSIP_IZIN_ISO_FOLDER_ID,
+        idPermohonan: request.idPermohonan,
+        nomorPermohonan: request.nomorPermohonan,
+        namaPegawai: request.namaPegawai,
+        fileName,
+        pdfBase64,
+      }),
+    });
+
+    const json = await res.json().catch(() => null);
+    const directFileUrl =
+      json && json.success && json.fileUrl && String(json.fileUrl).startsWith('https://drive.google.com/')
+        ? String(json.fileUrl)
+        : folderUrl;
+
+    const updatedStore: FullDatabaseStore = {
+      ...store,
+      PERMOHONAN: store.PERMOHONAN.map((r) =>
+        r.idPermohonan === request.idPermohonan ? { ...r, urlPdf: directFileUrl } : r
+      ),
+      ARSIP_DOKUMEN: store.ARSIP_DOKUMEN.map((d) =>
+        d.idPermohonan === request.idPermohonan ? { ...d, urlGoogleDrive: directFileUrl } : d
+      ),
+    };
+
+    saveDatabase(updatedStore);
+    return {
+      ok: Boolean(json && json.success),
+      fileUrl: directFileUrl,
+      folderUrl,
+      message:
+        json && json.success
+          ? `File PDF (${fileName}) berhasil di-upload otomatis ke folder Google Drive "${ARSIP_IZIN_ISO_FOLDER_NAME}".`
+          : `Tautan diarahkan ke folder Google Drive "${ARSIP_IZIN_ISO_FOLDER_NAME}".`,
+      updatedStore,
+    };
+  } catch {
+    return {
+      ok: false,
+      fileUrl: folderUrl,
+      folderUrl,
+      message: `Tautan diarahkan ke folder Google Drive "${ARSIP_IZIN_ISO_FOLDER_NAME}".`,
+      updatedStore: store,
+    };
+  }
+};
+

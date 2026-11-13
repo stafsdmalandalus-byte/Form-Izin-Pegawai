@@ -14,6 +14,7 @@ import {
   getVisibleLeaveRequests,
   recordActivity,
   saveDatabase,
+  uploadPdfToGasDriveFolder,
   validatePermission,
 } from '../services/databaseService';
 import { SignaturePad } from './SignaturePad';
@@ -33,6 +34,7 @@ import {
   Download,
   MessageSquareShare,
   Smartphone,
+  UserCheck,
 } from 'lucide-react';
 import { ShareMessageModal } from './ShareMessageModal';
 
@@ -42,6 +44,8 @@ interface ApprovalWorkflowViewProps {
   onStoreUpdate: (next: FullDatabaseStore) => void;
   onPreviewOfficialPdf: (req: LeaveRequest) => void;
   onEditRevisionRequest?: (req: LeaveRequest) => void;
+  initialFocusRequestId?: string | null;
+  onClearFocusRequest?: () => void;
 }
 
 export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
@@ -50,6 +54,8 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
   onStoreUpdate,
   onPreviewOfficialPdf,
   onEditRevisionRequest,
+  initialFocusRequestId,
+  onClearFocusRequest,
 }) => {
   const [selectedRequest, setSelectedRequest] = useState<LeaveRequest | null>(null);
   const [shareMessageRequest, setShareMessageRequest] = useState<LeaveRequest | null>(null);
@@ -98,6 +104,24 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
     setApproverSignature('');
     setFeedback(null);
   };
+
+  // Otomatis buka panel tanda tangan / fokus surat jika dibuka dari tautan cepat WhatsApp (?req=...)
+  useEffect(() => {
+    if (!initialFocusRequestId) return;
+    const targetReq = store.PERMOHONAN.find(
+      (r) =>
+        r.idPermohonan === initialFocusRequestId ||
+        r.nomorPermohonan === initialFocusRequestId
+    );
+    if (targetReq) {
+      if (canActAsSupervisor(targetReq) || canActAsMudir(targetReq)) {
+        handleOpenDecisionPanel(targetReq, 'SETUJUI');
+      } else {
+        onPreviewOfficialPdf(targetReq);
+      }
+      if (onClearFocusRequest) onClearFocusRequest();
+    }
+  }, [initialFocusRequestId, currentUser.userId]);
 
   const handleExecuteSupervisorDecision = () => {
     if (!selectedRequest) return;
@@ -378,6 +402,24 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
     setSelectedRequest(null);
 
     if (updatedReqObj) {
+      // 1. Jika DISETUJUI Mudir: Otomatis generate PDF A4 & upload ke Folder Google Drive "Arsip izin ISO" via GAS
+      if (decisionType === 'SETUJUI') {
+        try {
+          const applicantEmp = updatedStore.MASTER_PEGAWAI.find(
+            (e) => e.idPegawai === updatedReqObj.idPegawai
+          );
+          const pdfBase64 = generateOfficialLeavePDF(updatedReqObj, applicantEmp, 'base64');
+          uploadPdfToGasDriveFolder(updatedStore, updatedReqObj, pdfBase64, pdfFilename).then(
+            (driveRes) => {
+              onStoreUpdate(driveRes.updatedStore);
+            }
+          );
+        } catch {
+          // fallback tetap mengarah ke folder Arsip izin ISO
+        }
+      }
+
+      // 2. Kirim notifikasi WhatsApp otomatis ke Pemohon, Atasan & Pegawai Pengganti
       triggerWhatsAppAutomation(
         updatedStore,
         updatedReqObj,
@@ -390,7 +432,7 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
           type: 'success',
           text:
             decisionType === 'SETUJUI'
-              ? `Permohonan ${updatedReqObj.nomorPermohonan} berhasil DISETUJUI & PDF resmi (${pdfFilename}) dibuat. ${waRes.summaryText}`
+              ? `Permohonan ${updatedReqObj.nomorPermohonan} berhasil DISETUJUI, PDF resmi (${pdfFilename}) dibuat & diarsipkan ke folder "${ARSIP_IZIN_ISO_FOLDER_NAME}". ${waRes.summaryText}`
               : `Keputusan Mudir Unit (${decisionType}) berhasil disimpan. ${waRes.summaryText}`,
         });
       });
@@ -745,16 +787,27 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
                     </div>
                   </div>
 
-                  <div className="text-[11px] text-[#54656f] bg-[#f0f2f5] p-2.5 rounded-lg">
+                  <div className="text-[11px] text-[#54656f] bg-[#f0f2f5] p-2.5 rounded-lg space-y-1">
                     <div>
                       Atasan: <strong>{req.statusAtasan}</strong> · Mudir:{' '}
                       <strong>{req.statusMudir}</strong>
                     </div>
+                    {req.namaPegawaiPengganti && req.namaPegawaiPengganti !== '-' && (
+                      <div className="text-[#008069] font-semibold flex items-center gap-1 pt-1 border-t border-[#d1d7db]">
+                        <UserCheck className="w-3.5 h-3.5 shrink-0" />
+                        <span>
+                          Badal/Pengganti: {req.namaPegawaiPengganti}
+                          {req.catatanDelegasiTugas && req.catatanDelegasiTugas !== '-'
+                            ? ` (${req.catatanDelegasiTugas})`
+                            : ''}
+                        </span>
+                      </div>
+                    )}
                     {isApproved && (
-                      <div className="mt-1 pt-1 border-t border-[#d1d7db]">
+                      <div className="pt-1 border-t border-[#d1d7db]">
                         Folder Arsip ISO:{' '}
                         <a
-                          href={ARSIP_IZIN_ISO_FOLDER_URL}
+                          href={req.urlPdf && req.urlPdf.startsWith('https://drive.google.com/') ? req.urlPdf : ARSIP_IZIN_ISO_FOLDER_URL}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-[#008069] font-mono font-bold underline break-all"
@@ -889,6 +942,11 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
                       <div className="text-[11px] text-[#667781]">
                         {req.bidang} · {req.unit}
                       </div>
+                      {req.namaPegawaiPengganti && req.namaPegawaiPengganti !== '-' && (
+                        <div className="text-[11px] font-semibold text-[#008069] mt-0.5">
+                          Badal: {req.namaPegawaiPengganti}
+                        </div>
+                      )}
                     </td>
                     <td className="py-3 px-3">
                       <div className="font-bold text-[#008069]">{req.jenisPermohonan}</div>

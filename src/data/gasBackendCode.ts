@@ -148,6 +148,25 @@ function doPost(e) {
     lock.waitLock(15000);
     var body = JSON.parse(e.postData.contents);
     var ss = getTargetSpreadsheet();
+
+    if (body.action === 'uploadPdfArchive' && body.pdfBase64) {
+      var targetFolderId = body.folderId || '1ejMB8Sdcpcq2NOHFgkoxTdbuYi5dbjEE';
+      var folder = DriveApp.getFolderById(targetFolderId);
+      var bytes = Utilities.base64Decode(body.pdfBase64);
+      var blob = Utilities.newBlob(bytes, 'application/pdf', body.fileName || 'Surat_Izin_Cuti.pdf');
+      var file = folder.createFile(blob);
+      try {
+        file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      } catch (shareErr) {}
+      var fileUrl = file.getUrl();
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        fileId: file.getId(),
+        fileUrl: fileUrl,
+        folderUrl: 'https://drive.google.com/drive/folders/' + targetFolderId + '?usp=drive_link'
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
     if (body.action === 'syncPush' && body.payload) {
       writeAllSheets(ss, body.payload);
     }

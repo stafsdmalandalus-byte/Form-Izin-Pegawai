@@ -42,9 +42,9 @@ import {
   LogIn,
   Eye,
   EyeOff,
-  MessageSquare,
   CheckCircle2,
   Loader2,
+  KeyRound,
 } from 'lucide-react';
 
 type ActiveMenu =
@@ -96,6 +96,23 @@ export function App() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [previewPdfRequest, setPreviewPdfRequest] = useState<LeaveRequest | null>(null);
   const [editingRequest, setEditingRequest] = useState<LeaveRequest | null>(null);
+
+  // Tautan Cepat Persetujuan 1-Klik dari WhatsApp (?req=REQ-...)
+  const [deepLinkReqId, setDeepLinkReqId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('req');
+  });
+
+  // State Modal Ubah Password Mandiri oleh Pegawai
+  const [showChangePassModal, setShowChangePassModal] = useState(false);
+  const [oldPassInput, setOldPassInput] = useState('');
+  const [newPassInput, setNewPassInput] = useState('');
+  const [confirmPassInput, setConfirmPassInput] = useState('');
+  const [changePassMsg, setChangePassMsg] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
 
   // Jam WIB Live di Halaman Depan
   const [wibTime, setWibTime] = useState<string>(() => formatWibClock(new Date()));
@@ -418,10 +435,109 @@ export function App() {
       setIsAdminSdmSession(activeUserAccount.role === 'ADMIN SDM');
       setLoginPassword('');
       setShowNameDropdown(false);
-      setActiveMenu('dashboard');
+      // Jika login dari tautan cepat WhatsApp (?req=...), langsung buka menu Persetujuan & fokus suratnya
+      if (deepLinkReqId) {
+        setActiveMenu('persetujuan');
+      } else {
+        setActiveMenu('dashboard');
+      }
     } finally {
       setIsLoggingIn(false);
     }
+  };
+
+  // Ubah Password Mandiri oleh Pegawai (Langsung tersinkron ke sheet USERS & MASTER_PEGAWAI di Google Spreadsheet)
+  const handleSaveMyNewPassword = (e: React.FormEvent) => {
+    e.preventDefault();
+    setChangePassMsg(null);
+    if (!currentUser) return;
+
+    const cleanOld = oldPassInput.trim();
+    const cleanNew = newPassInput.trim();
+    const cleanConfirm = confirmPassInput.trim();
+
+    if (!cleanOld || !cleanNew) {
+      setChangePassMsg({
+        type: 'error',
+        text: 'Mohon isi password saat ini dan password baru.',
+      });
+      return;
+    }
+
+    if (cleanNew.length < 4) {
+      setChangePassMsg({
+        type: 'error',
+        text: 'Password baru minimal terdiri dari 4 karakter/angka.',
+      });
+      return;
+    }
+
+    if (cleanNew !== cleanConfirm) {
+      setChangePassMsg({
+        type: 'error',
+        text: 'Konfirmasi password baru tidak cocok.',
+      });
+      return;
+    }
+
+    const linkedEmp = store.MASTER_PEGAWAI.find(
+      (emp) =>
+        emp.idPegawai === currentUser.idPegawai ||
+        emp.nip === currentUser.idPegawai ||
+        emp.namaLengkap.trim().toLowerCase() === currentUser.namaPengguna.trim().toLowerCase()
+    );
+
+    if (linkedEmp) {
+      const check = checkPasswordForEmployee(store, linkedEmp, cleanOld);
+      if (!check.matched) {
+        setChangePassMsg({
+          type: 'error',
+          text: 'Password saat ini / Tanggal Lahir tidak sesuai.',
+        });
+        return;
+      }
+    }
+
+    const newHash = hashPassword(cleanNew);
+    const updatedStore: FullDatabaseStore = {
+      ...store,
+      USERS: store.USERS.map((u) =>
+        u.userId === currentUser.userId
+          ? { ...u, passwordPlain: cleanNew, passwordHash: newHash }
+          : u
+      ),
+      MASTER_PEGAWAI: store.MASTER_PEGAWAI.map((emp) =>
+        linkedEmp && emp.idPegawai === linkedEmp.idPegawai
+          ? { ...emp, tanggalLahir: cleanNew }
+          : emp
+      ),
+    };
+
+    const updatedUser: UserAccount = {
+      ...currentUser,
+      passwordPlain: cleanNew,
+      passwordHash: newHash,
+    };
+
+    recordActivity(
+      updatedStore,
+      updatedUser,
+      'UBAH_PASSWORD_MANDIRI',
+      'AUTH',
+      updatedUser.userId,
+      `Pegawai ${updatedUser.namaPengguna} memperbarui password akun secara mandiri (tersinkron ke Spreadsheet).`
+    );
+
+    saveDatabase(updatedStore);
+    setStore(updatedStore);
+    setCurrentUser(updatedUser);
+    setOldPassInput('');
+    setNewPassInput('');
+    setConfirmPassInput('');
+    setChangePassMsg({
+      type: 'success',
+      text: 'Alhamdulillah, password baru Anda berhasil disimpan dan disinkronkan ke Google Spreadsheet.',
+    });
   };
 
   // Khusus Admin SDM: Pindah ke mode pegawai lain secara langsung tanpa perlu memasukkan Tanggal Lahir
@@ -470,6 +586,16 @@ export function App() {
     );
     setStore(updatedStore);
   };
+
+  const deepLinkedRequestObj = useMemo(() => {
+    if (!deepLinkReqId) return null;
+    return (
+      store.PERMOHONAN.find(
+        (r) =>
+          r.idPermohonan === deepLinkReqId || r.nomorPermohonan === deepLinkReqId
+      ) || null
+    );
+  }, [store.PERMOHONAN, deepLinkReqId]);
 
   // ===========================================================================
   // TAMPILAN LOGIN RESPONSIF (HP & LAPTOP) DENGAN TEMA WHATSAPP WEB & MOBILE
@@ -571,6 +697,19 @@ export function App() {
 
               {/* Body Form di Atas Kanvas WhatsApp */}
               <div className="p-4 sm:p-6 flex-1 flex flex-col justify-center space-y-4">
+                {deepLinkedRequestObj && (
+                  <div className="bg-[#d9fdd3] border-2 border-[#00a884] rounded-xl p-3 text-xs text-[#111b21] shadow-2xs">
+                    <div className="font-bold text-[#008069]">
+                      ⚡ Tautan Cepat Persetujuan WhatsApp Terdeteksi:
+                    </div>
+                    <div className="mt-0.5">
+                      Surat <strong>{deepLinkedRequestObj.nomorPermohonan}</strong> atas nama{' '}
+                      <strong>{deepLinkedRequestObj.namaPegawai}</strong> ({deepLinkedRequestObj.jenisPermohonan} —{' '}
+                      {deepLinkedRequestObj.kategoriKeperluan}). Silakan masuk untuk langsung menandatangani/melihat surat ini!
+                    </div>
+                  </div>
+                )}
+
                 {/* Gelembung Kuning Info Singkat ala Enkripsi WhatsApp */}
                 <div className="bg-[#fff5c4] border border-[#e6daa6] rounded-xl px-3.5 py-2 text-[11px] sm:text-xs text-[#54656f] text-center shadow-2xs">
                   🔒 Gunakan <strong>Nama Pegawai</strong> terdaftar dan <strong>Password / Tanggal Lahir (ddmmyyyy)</strong> untuk masuk.
@@ -1007,8 +1146,8 @@ export function App() {
           </nav>
         </div>
 
-        {/* Footer Sidebar Kiri: Beralih Mode Pegawai (Khusus ADMIN SDM, Langsung Tanpa Tanggal Lahir) & Keluar */}
-        <div className="p-3.5 bg-[#f0f2f5] border-t border-[#d1d7db] space-y-2.5 text-xs">
+        {/* Footer Sidebar Kiri: Beralih Mode Pegawai (Khusus ADMIN SDM, Langsung Tanpa Tanggal Lahir), Ubah Password & Keluar */}
+        <div className="p-3.5 bg-[#f0f2f5] border-t border-[#d1d7db] space-y-2 text-xs">
           {(currentUser.role === 'ADMIN SDM' || isAdminSdmSession) && (
             <div>
               <label className="block text-[11px] font-semibold text-[#54656f] mb-1">
@@ -1028,17 +1167,32 @@ export function App() {
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={() => {
-              setIsAdminSdmSession(false);
-              setCurrentUser(null);
-            }}
-            className="w-full min-h-[40px] flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold text-red-700 bg-white border border-[#d1d7db] hover:bg-red-50 rounded-lg transition-colors"
-          >
-            <LogOut className="w-4 h-4" />
-            Keluar Sesi Login
-          </button>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setChangePassMsg(null);
+                setShowChangePassModal(true);
+                setMobileSidebarOpen(false);
+              }}
+              className="min-h-[38px] flex items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-bold text-[#008069] bg-white border border-[#d1d7db] hover:bg-[#d9fdd3]/50 rounded-lg transition-colors"
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              Ubah Password
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setIsAdminSdmSession(false);
+                setCurrentUser(null);
+              }}
+              className="min-h-[38px] flex items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-bold text-red-700 bg-white border border-[#d1d7db] hover:bg-red-50 rounded-lg transition-colors"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              Keluar Sesi
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -1079,6 +1233,18 @@ export function App() {
             >
               <FilePlus2 className="w-3.5 h-3.5" />
               <span>Ajukan Izin/Cuti</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setChangePassMsg(null);
+                setShowChangePassModal(true);
+              }}
+              className="p-2 text-white/90 hover:text-white rounded-full hover:bg-white/10 transition-colors"
+              title="Ubah Password Saya"
+            >
+              <KeyRound className="w-4 h-4" />
             </button>
 
             <button
@@ -1152,6 +1318,8 @@ export function App() {
                 setEditingRequest(req);
                 setActiveMenu('permohonan_baru');
               }}
+              initialFocusRequestId={deepLinkReqId}
+              onClearFocusRequest={() => setDeepLinkReqId(null)}
             />
           )}
 
@@ -1387,6 +1555,108 @@ export function App() {
           )}
         </button>
       </nav>
+
+      {/* MODAL UBAH PASSWORD MANDIRI PEGAWAI */}
+      {showChangePassModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="bg-white border border-[#d1d7db] rounded-2xl max-w-md w-full shadow-2xl overflow-hidden">
+            <div className="bg-[#008069] text-white px-5 py-3.5 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <KeyRound className="w-5 h-5 text-[#d9fdd3]" />
+                <div>
+                  <h3 className="text-sm font-bold">Ubah Password Saya</h3>
+                  <p className="text-[11px] text-white/85">
+                    {currentUser.namaPengguna} ({currentUser.role})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowChangePassModal(false)}
+                className="p-1.5 text-white/80 hover:text-white rounded-full"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveMyNewPassword} className="p-5 space-y-3.5 text-xs">
+              <div className="bg-[#fff5c4] border border-[#e6daa6] rounded-xl p-2.5 text-[#54656f]">
+                🔒 Password baru yang Anda simpan akan langsung berlaku dan otomatis tersinkron ke sheet <strong>USERS</strong> di Google Spreadsheet.
+              </div>
+
+              {changePassMsg && (
+                <div
+                  className={`p-3 rounded-xl border font-medium ${
+                    changePassMsg.type === 'success'
+                      ? 'bg-[#d9fdd3] border-[#b7f0ad] text-[#111b21]'
+                      : 'bg-red-50 border-red-200 text-red-900'
+                  }`}
+                >
+                  {changePassMsg.text}
+                </div>
+              )}
+
+              <div>
+                <label className="block font-bold text-[#111b21] mb-1">
+                  Password Saat Ini / Tanggal Lahir (ddmmyyyy)
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={oldPassInput}
+                  onChange={(e) => setOldPassInput(e.target.value)}
+                  placeholder="Masukkan password lama..."
+                  className="w-full px-3.5 py-2.5 bg-[#f0f2f5] border border-[#d1d7db] rounded-xl font-mono focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#00a884]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-[#111b21] mb-1">
+                  Password Baru
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newPassInput}
+                  onChange={(e) => setNewPassInput(e.target.value)}
+                  placeholder="Minimal 4 karakter / angka..."
+                  className="w-full px-3.5 py-2.5 bg-[#f0f2f5] border border-[#d1d7db] rounded-xl font-mono focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#00a884]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-[#111b21] mb-1">
+                  Konfirmasi Password Baru
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={confirmPassInput}
+                  onChange={(e) => setConfirmPassInput(e.target.value)}
+                  placeholder="Ketik ulang password baru..."
+                  className="w-full px-3.5 py-2.5 bg-[#f0f2f5] border border-[#d1d7db] rounded-xl font-mono focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#00a884]"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowChangePassModal(false)}
+                  className="px-4 py-2 font-semibold text-[#54656f] bg-[#f0f2f5] hover:bg-[#e9edef] rounded-xl"
+                >
+                  Tutup
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 font-bold text-white bg-[#00a884] hover:bg-[#008069] rounded-xl"
+                >
+                  Simpan Password Baru
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* MODAL PRATINJAU & CETAK FORMULIR PDF RESMI */}
       {previewPdfRequest && (

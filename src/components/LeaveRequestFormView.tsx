@@ -6,9 +6,11 @@ import {
   UserAccount,
 } from '../types';
 import {
+  calculateEffectiveLeaveDays,
   createNotification,
   FullDatabaseStore,
   generateRequestNumber,
+  getPesantrenHolidays,
   getTimestamp,
   recordActivity,
   saveDatabase,
@@ -18,10 +20,12 @@ import { OfficialLetterPaper } from './OfficialFormModal';
 import {
   formatWhatsAppUrl,
   generateFollowUpMessageText,
+  generateSubstituteDelegationMessageText,
 } from '../utils/messageShareHelper';
 import { triggerWhatsAppAutomation } from '../services/whatsappNotificationService';
 import {
   AlertCircle,
+  CalendarCheck,
   CheckCircle2,
   FileText,
   Save,
@@ -29,6 +33,7 @@ import {
   ShieldAlert,
   Info,
   Smartphone,
+  UserCheck,
 } from 'lucide-react';
 
 interface LeaveRequestFormViewProps {
@@ -60,6 +65,8 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
     [store.KETENTUAN_IZIN_CUTI]
   );
 
+  const pesantrenHolidays = useMemo(() => getPesantrenHolidays(store), [store]);
+
   const [jenisPermohonan, setJenisPermohonan] = useState<
     'Izin' | 'Cuti' | 'Izin Kondisional/Khusus'
   >(editingRequest?.jenisPermohonan || 'Izin');
@@ -83,8 +90,37 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
     editingRequest?.ttdPemohonUrl || ''
   );
 
+  // State Pendelegasian Tugas / Pegawai Pengganti (Badal / Inval)
+  const [idPegawaiPengganti, setIdPegawaiPengganti] = useState<string>(
+    editingRequest?.idPegawaiPengganti || ''
+  );
+  const [noWaPegawaiPengganti, setNoWaPegawaiPengganti] = useState<string>(
+    editingRequest?.noWaPegawaiPengganti || ''
+  );
+  const [catatanDelegasiTugas, setCatatanDelegasiTugas] = useState<string>(
+    editingRequest?.catatanDelegasiTugas || ''
+  );
+
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Daftar rekan pegawai aktif untuk dipilih sebagai Pegawai Pengganti (Badal / Inval)
+  const colleagueOptions = useMemo(() => {
+    const activeList = store.MASTER_PEGAWAI.filter(
+      (e) => e.statusAktif === 'Aktif' && e.idPegawai !== linkedEmployee?.idPegawai
+    );
+    return activeList.sort((a, b) => {
+      const aSameUnit = a.unit === linkedEmployee?.unit ? 0 : 1;
+      const bSameUnit = b.unit === linkedEmployee?.unit ? 0 : 1;
+      if (aSameUnit !== bSameUnit) return aSameUnit - bSameUnit;
+      return a.namaLengkap.localeCompare(b.namaLengkap);
+    });
+  }, [store.MASTER_PEGAWAI, linkedEmployee]);
+
+  const selectedSubstituteEmployee = useMemo(
+    () => colleagueOptions.find((e) => e.idPegawai === idPegawaiPengganti),
+    [colleagueOptions, idPegawaiPengganti]
+  );
 
   // Cari data Atasan Langsung untuk pengiriman langsung ke WhatsApp saat klik Konfirmasi & Kirim Sekarang
   const supervisorEmployee: Employee | undefined = useMemo(() => {
@@ -124,6 +160,29 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
     );
   }, [selectedPolicy, jenisPermohonan]);
 
+  // Hitung rincian hari kalender & hari efektif (mengecualikan Hari Libur Resmi Pesantren)
+  const effectiveCalc = useMemo(
+    () => calculateEffectiveLeaveDays(tanggalMulai, tanggalSelesai, pesantrenHolidays),
+    [tanggalMulai, tanggalSelesai, pesantrenHolidays]
+  );
+
+  // Hitung sisa kuota cuti tahunan 12 hari pegawai saat ini
+  const usedAnnualLeaveDays = useMemo(() => {
+    if (!linkedEmployee) return 0;
+    const currentYear = new Date().getFullYear().toString();
+    return store.PERMOHONAN.filter(
+      (r) =>
+        r.idPegawai === linkedEmployee.idPegawai &&
+        r.idPermohonan !== editingRequest?.idPermohonan &&
+        (r.statusPermohonan === 'DISETUJUI' || r.statusPermohonan === 'DIARSIPKAN') &&
+        r.jenisPermohonan === 'Cuti' &&
+        r.tanggalMulai.startsWith(currentYear)
+    ).reduce((acc, r) => {
+      const m = String(r.jumlahHari || '').match(/(\d+)/);
+      return acc + (m ? parseInt(m[1], 10) : 0);
+    }, 0);
+  }, [store.PERMOHONAN, linkedEmployee, editingRequest]);
+
   // Hitung jumlah hari secara otomatis, KECUALI untuk durasi Kebijaksanaan / Sesuai sakit umum (Aturan J.6)
   const calculatedJumlahHari = useMemo(() => {
     if (selectedPolicy?.durasi === 'Kebijaksanaan') {
@@ -132,14 +191,12 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
     if (selectedPolicy?.durasi === 'Sesuai sakit umum') {
       return 'Sesuai Pemeriksaan Medis Resmi';
     }
-    if (!tanggalMulai || !tanggalSelesai) return '-';
-    const start = new Date(tanggalMulai);
-    const end = new Date(tanggalSelesai);
-    const diffMs = end.getTime() - start.getTime();
-    if (diffMs < 0) return 'Tanggal tidak valid';
-    const days = Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
-    return `${days} Hari`;
-  }, [tanggalMulai, tanggalSelesai, selectedPolicy]);
+    if (!effectiveCalc.valid) return 'Tanggal tidak valid';
+    if (effectiveCalc.skippedHolidays.length > 0) {
+      return `${effectiveCalc.effectiveDays} Hari Efektif`;
+    }
+    return `${effectiveCalc.effectiveDays} Hari`;
+  }, [effectiveCalc, selectedPolicy]);
 
   // Jika data pegawai belum ada di MASTER_PEGAWAI (Aturan Bagian F: Jangan buat nama pegawai fiktif)
   if (!linkedEmployee) {
@@ -166,6 +223,23 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
     }
   };
 
+  const buildCombinedKeterangan = (): string => {
+    const parts: string[] = [];
+    if (selectedSubstituteEmployee) {
+      parts.push(
+        `Badal/Pengganti: ${selectedSubstituteEmployee.namaLengkap}${
+          catatanDelegasiTugas.trim() ? ` (${catatanDelegasiTugas.trim()})` : ''
+        }`
+      );
+    } else if (catatanDelegasiTugas.trim()) {
+      parts.push(`Delegasi: ${catatanDelegasiTugas.trim()}`);
+    }
+    if (keteranganTambahan.trim()) {
+      parts.push(keteranganTambahan.trim());
+    }
+    return parts.join(' | ') || '-';
+  };
+
   const handleSaveAsDraft = () => {
     setErrorMsg(null);
     const updatedStore = { ...store };
@@ -189,7 +263,7 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
       tanggalSelesai,
       jumlahHari: calculatedJumlahHari,
       alasan: alasan || '-',
-      keteranganTambahan: keteranganTambahan || '-',
+      keteranganTambahan: buildCombinedKeterangan(),
       lampiran: lampiranName || '-',
       tanggalPengajuan: ts,
       statusPermohonan: 'DRAFT',
@@ -203,6 +277,11 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
       tanggalDiarsipkan: '-',
       ttdPemohonUrl: signatureDataUrl,
       waktuTtdPemohon: signatureDataUrl ? ts : undefined,
+      idPegawaiPengganti: selectedSubstituteEmployee?.idPegawai || '-',
+      namaPegawaiPengganti: selectedSubstituteEmployee?.namaLengkap || '-',
+      noWaPegawaiPengganti:
+        noWaPegawaiPengganti.trim() || selectedSubstituteEmployee?.nomorTelepon || '-',
+      catatanDelegasiTugas: catatanDelegasiTugas.trim() || '-',
     };
 
     if (editingRequest) {
@@ -268,7 +347,7 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
       tanggalSelesai,
       jumlahHari: calculatedJumlahHari,
       alasan: alasan.trim(),
-      keteranganTambahan: keteranganTambahan.trim() || '-',
+      keteranganTambahan: buildCombinedKeterangan(),
       lampiran: lampiranName || '-',
       tanggalPengajuan: ts,
       statusPermohonan: 'MENUNGGU PERSETUJUAN ATASAN',
@@ -282,6 +361,11 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
       tanggalDiarsipkan: '-',
       ttdPemohonUrl: signatureDataUrl,
       waktuTtdPemohon: ts,
+      idPegawaiPengganti: selectedSubstituteEmployee?.idPegawai || '-',
+      namaPegawaiPengganti: selectedSubstituteEmployee?.namaLengkap || '-',
+      noWaPegawaiPengganti:
+        noWaPegawaiPengganti.trim() || selectedSubstituteEmployee?.nomorTelepon || '-',
+      catatanDelegasiTugas: catatanDelegasiTugas.trim() || '-',
     };
 
     if (editingRequest) {
@@ -541,7 +625,7 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Jumlah Hari (Otomatis)
+                Jumlah Hari Efektif (Otomatis)
               </label>
               <input
                 type="text"
@@ -550,6 +634,46 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
                 className="w-full px-3 py-2 text-sm border border-slate-200 bg-slate-100 text-slate-900 font-semibold rounded-md font-mono tabular-nums"
               />
             </div>
+          </div>
+
+          {/* Rincian Kalender Libur Resmi Pesantren & Kuota Cuti Tahunan 12 Hari */}
+          <div className="p-3.5 rounded-xl bg-[#f0f2f5] border border-[#d1d7db] text-xs space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 font-bold text-[#008069]">
+                <CalendarCheck className="w-4 h-4 shrink-0" />
+                <span>
+                  Perhitungan Hari Efektif & Kuota Cuti Tahunan (12 Hari)
+                </span>
+              </div>
+              <span className="px-2.5 py-0.5 rounded-full bg-[#d9fdd3] text-[#008069] font-mono font-bold">
+                Terpakai: {usedAnnualLeaveDays} Hari · Sisa Kuota Cuti: {Math.max(0, 12 - usedAnnualLeaveDays)} dari 12 Hari
+              </span>
+            </div>
+            {effectiveCalc.valid && (
+              <div className="text-[#54656f] flex flex-wrap items-center gap-x-4 gap-y-1">
+                <span>
+                  • Rentang Kalender: <strong className="text-[#111b21]">{effectiveCalc.totalCalendarDays} hari</strong>
+                </span>
+                <span>
+                  • Libur Resmi Pesantren Terlewati:{' '}
+                  <strong className="text-[#008069]">
+                    {effectiveCalc.skippedHolidays.length} hari (Tidak Memotong Kuota Cuti)
+                  </strong>
+                </span>
+                <span>
+                  • Hari Efektif Terhitung:{' '}
+                  <strong className="text-[#111b21]">{effectiveCalc.effectiveDays} hari</strong>
+                </span>
+              </div>
+            )}
+            {effectiveCalc.skippedHolidays.length > 0 && (
+              <div className="p-2 rounded-lg bg-[#d9fdd3]/70 border border-[#b7f0ad] text-[#111b21]">
+                <strong>Hari Libur Pesantren yang dikecualikan otomatis:</strong>{' '}
+                {effectiveCalc.skippedHolidays
+                  .map((h) => `${h.tanggal} (${h.keterangan})`)
+                  .join(', ')}
+              </div>
+            )}
           </div>
 
           <div>
@@ -566,16 +690,84 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
             />
           </div>
 
+          {/* BAGIAN KHUSUS: PENDELEGASIAN TUGAS / PEGAWAI PENGGANTI (BADAL / INVAL) */}
+          <div className="p-4 rounded-xl bg-[#d9fdd3]/45 border border-[#b7f0ad] space-y-3">
+            <div className="flex items-center gap-2">
+              <UserCheck className="w-4 h-4 text-[#008069] shrink-0" />
+              <div>
+                <h4 className="text-xs font-bold text-[#111b21]">
+                  Pendelegasian Tugas / Pegawai Pengganti (Badal / Inval) — Opsional
+                </h4>
+                <p className="text-[11px] text-[#54656f]">
+                  Pilih ustadz/rekan pegawai yang menggantikan jam mengajar atau tugas piket selama Anda izin/cuti. Notifikasi WA otomatis akan dikirimkan juga kepada pegawai pengganti.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+              <div>
+                <label className="block font-semibold text-[#111b21] mb-1">
+                  Pilih Pegawai Pengganti (Badal / Inval)
+                </label>
+                <select
+                  value={idPegawaiPengganti}
+                  onChange={(e) => {
+                    const chosenId = e.target.value;
+                    setIdPegawaiPengganti(chosenId);
+                    const emp = colleagueOptions.find((c) => c.idPegawai === chosenId);
+                    if (emp && emp.nomorTelepon && emp.nomorTelepon !== '-') {
+                      setNoWaPegawaiPengganti(emp.nomorTelepon);
+                    }
+                  }}
+                  className="w-full px-3 py-2 text-xs border border-[#d1d7db] rounded-lg bg-white text-[#111b21]"
+                >
+                  <option value="">-- Tidak Ada / Pilih Pegawai Pengganti --</option>
+                  {colleagueOptions.map((col) => (
+                    <option key={col.idPegawai} value={col.idPegawai}>
+                      {col.namaLengkap} ({col.jabatan} · {col.unit})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[#111b21] mb-1">
+                  No. WhatsApp Pegawai Pengganti
+                </label>
+                <input
+                  type="text"
+                  value={noWaPegawaiPengganti}
+                  onChange={(e) => setNoWaPegawaiPengganti(e.target.value)}
+                  placeholder="Otomatis terisi saat memilih pegawai..."
+                  className="w-full px-3 py-2 text-xs font-mono border border-[#d1d7db] rounded-lg bg-white text-[#111b21]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[#111b21] mb-1">
+                  Rincian Jam Mengajar / Tugas yang Didelegasikan
+                </label>
+                <input
+                  type="text"
+                  value={catatanDelegasiTugas}
+                  onChange={(e) => setCatatanDelegasiTugas(e.target.value)}
+                  placeholder="Contoh: Badal mengajar kelas VIII-A jam ke 1-2"
+                  className="w-full px-3 py-2 text-xs border border-[#d1d7db] rounded-lg bg-white text-[#111b21]"
+                />
+              </div>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Keterangan Tambahan / Pendelegasian Tugas
+                Keterangan Tambahan Lainnya (Opsional)
               </label>
               <input
                 type="text"
                 value={keteranganTambahan}
                 onChange={(e) => setKeteranganTambahan(e.target.value)}
-                placeholder="Contoh: Tugas mengajar didelegasikan kepada Ustadz..."
+                placeholder="Catatan tambahan (jika ada)..."
                 className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md"
               />
             </div>
@@ -638,44 +830,102 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
                   Konfirmasi Pengajuan & Kirim ke WhatsApp Atasan Langsung
                 </h3>
                 <p className="text-xs text-white/85">
-                  Periksa surat permohonan yang telah Anda tandatangani di bawah ini. Klik &ldquo;Konfirmasi &amp; Kirim Sekarang&rdquo; untuk menyimpan dan langsung mengirim ke WhatsApp Atasan Langsung.
+                  Periksa surat permohonan yang telah Anda tandatangani di bawah ini. Klik &ldquo;Konfirmasi &amp; Kirim Sekarang&rdquo; untuk menyimpan dan langsung mengirim ke WhatsApp Atasan Langsung (dilengkapi tautan persetujuan 1-klik).
                 </p>
               </div>
             </div>
 
             <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
-              {/* Nomor WhatsApp Atasan Langsung */}
-              <div className="bg-[#f0f2f5] border border-[#d1d7db] rounded-xl p-3.5 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-[#111b21] mb-1">
-                    Atasan Langsung Penerima
-                  </label>
-                  <input
-                    type="text"
-                    readOnly
-                    value={
-                      supervisorEmployee
-                        ? `${supervisorEmployee.namaLengkap} (${supervisorEmployee.jabatan})`
-                        : `Atasan Langsung (${linkedEmployee.unit})`
-                    }
-                    className="w-full px-3 py-2 bg-white border border-[#d1d7db] rounded-lg font-semibold text-[#111b21]"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-[#111b21] mb-1">
-                    Nomor WhatsApp Atasan Langsung (Opsional)
-                  </label>
-                  <div className="relative">
-                    <Smartphone className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              {/* Nomor WhatsApp Atasan Langsung & Info Pegawai Pengganti */}
+              <div className="bg-[#f0f2f5] border border-[#d1d7db] rounded-xl p-3.5 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-[#111b21] mb-1">
+                      Atasan Langsung Penerima
+                    </label>
                     <input
                       type="text"
-                      value={supervisorWaPhone}
-                      onChange={(e) => setSupervisorWaPhone(e.target.value)}
-                      placeholder="Kosongkan untuk pilih kontak langsung di WA"
-                      className="w-full pl-8 pr-3 py-2 bg-white border border-[#d1d7db] rounded-lg font-mono text-[#111b21]"
+                      readOnly
+                      value={
+                        supervisorEmployee
+                          ? `${supervisorEmployee.namaLengkap} (${supervisorEmployee.jabatan})`
+                          : `Atasan Langsung (${linkedEmployee.unit})`
+                      }
+                      className="w-full px-3 py-2 bg-white border border-[#d1d7db] rounded-lg font-semibold text-[#111b21]"
                     />
                   </div>
+                  <div>
+                    <label className="block font-bold text-[#111b21] mb-1">
+                      Nomor WhatsApp Atasan Langsung (Opsional)
+                    </label>
+                    <div className="relative">
+                      <Smartphone className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={supervisorWaPhone}
+                        onChange={(e) => setSupervisorWaPhone(e.target.value)}
+                        placeholder="Kosongkan untuk pilih kontak langsung di WA"
+                        className="w-full pl-8 pr-3 py-2 bg-white border border-[#d1d7db] rounded-lg font-mono text-[#111b21]"
+                      />
+                    </div>
+                  </div>
                 </div>
+
+                {selectedSubstituteEmployee && (
+                  <div className="pt-2.5 border-t border-[#d1d7db] flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <span className="font-bold text-[#008069]">
+                        Pegawai Pengganti (Badal/Inval):
+                      </span>{' '}
+                      <strong>{selectedSubstituteEmployee.namaLengkap}</strong> (
+                      {noWaPegawaiPengganti || selectedSubstituteEmployee.nomorTelepon || '-'})
+                      {catatanDelegasiTugas && ` — ${catatanDelegasiTugas}`}
+                    </div>
+                    <a
+                      href={formatWhatsAppUrl(
+                        noWaPegawaiPengganti || selectedSubstituteEmployee.nomorTelepon,
+                        generateSubstituteDelegationMessageText({
+                          idPermohonan: editingRequest?.idPermohonan || 'PREVIEW',
+                          nomorPermohonan:
+                            editingRequest?.nomorPermohonan || 'AIS-IZC-2026-XXXX',
+                          idPegawai: linkedEmployee.idPegawai,
+                          namaPegawai: linkedEmployee.namaLengkap,
+                          nip: linkedEmployee.nip,
+                          bidang: linkedEmployee.bidang,
+                          bagian: linkedEmployee.bagian,
+                          jabatan: linkedEmployee.jabatan,
+                          unit: linkedEmployee.unit,
+                          jenisPermohonan,
+                          kategoriKeperluan,
+                          tanggalMulai,
+                          tanggalSelesai,
+                          jumlahHari: calculatedJumlahHari,
+                          alasan: alasan.trim(),
+                          keteranganTambahan: buildCombinedKeterangan(),
+                          lampiran: lampiranName || '-',
+                          tanggalPengajuan: getTimestamp(),
+                          statusPermohonan: 'MENUNGGU PERSETUJUAN ATASAN',
+                          statusAtasan: 'MENUNGGU',
+                          statusMudir: 'BELUM DIPROSES',
+                          catatanAtasan: '-',
+                          catatanMudir: '-',
+                          catatanSdm: '-',
+                          urlPdf: '-',
+                          tanggalDisetujui: '-',
+                          tanggalDiarsipkan: '-',
+                          namaPegawaiPengganti: selectedSubstituteEmployee.namaLengkap,
+                          catatanDelegasiTugas: catatanDelegasiTugas.trim(),
+                        })
+                      )}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#d9fdd3] border border-[#b7f0ad] text-[#008069] font-bold hover:bg-[#b7f0ad]"
+                    >
+                      <UserCheck className="w-3.5 h-3.5" />
+                      Hubungi WA Badal
+                    </a>
+                  </div>
+                )}
               </div>
 
               {/* Pratinjau Surat Resmi AIS-FRM-SEK.02.11 yang Sudah Ditandatangani Pemohon (Times New Roman) */}
@@ -700,7 +950,7 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
                     tanggalSelesai,
                     jumlahHari: calculatedJumlahHari,
                     alasan: alasan.trim(),
-                    keteranganTambahan: keteranganTambahan.trim() || '-',
+                    keteranganTambahan: buildCombinedKeterangan(),
                     lampiran: lampiranName || '-',
                     tanggalPengajuan: getTimestamp(),
                     statusPermohonan: 'MENUNGGU PERSETUJUAN ATASAN',
@@ -713,6 +963,8 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
                     tanggalDisetujui: '-',
                     tanggalDiarsipkan: '-',
                     ttdPemohonUrl: signatureDataUrl,
+                    namaPegawaiPengganti: selectedSubstituteEmployee?.namaLengkap,
+                    catatanDelegasiTugas: catatanDelegasiTugas.trim(),
                   }}
                 />
               </div>

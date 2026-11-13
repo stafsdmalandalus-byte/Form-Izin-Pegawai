@@ -85,7 +85,7 @@ export const formatOfficialWordFilename = (request: LeaveRequest): string => {
 export const generateOfficialLeavePDF = (
   request: LeaveRequest,
   _employee?: Employee,
-  mode: 'download' | 'bloburl' = 'download'
+  mode: 'download' | 'bloburl' | 'base64' = 'download'
 ): string => {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -353,6 +353,11 @@ export const generateOfficialLeavePDF = (
   const fileName = formatOfficialPdfFilename(request);
   if (mode === 'download') {
     doc.save(fileName);
+  }
+  if (mode === 'base64') {
+    const dataUri = doc.output('datauristring');
+    const commaIdx = dataUri.indexOf(',');
+    return commaIdx >= 0 ? dataUri.slice(commaIdx + 1) : dataUri;
   }
   const blob = doc.output('blob');
   return URL.createObjectURL(blob);

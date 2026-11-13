@@ -29,6 +29,18 @@ export const generateFollowUpMessageText = (
       : '';
 
   const appUrl = typeof window !== 'undefined' ? window.location.origin : '';
+  const deepLinkUrl = appUrl
+    ? `${appUrl}/?req=${encodeURIComponent(request.idPermohonan)}`
+    : '';
+
+  const delegationLine =
+    request.namaPegawaiPengganti && request.namaPegawaiPengganti !== '-'
+      ? `• *Pegawai Pengganti (Badal/Inval):* ${request.namaPegawaiPengganti}${
+          request.catatanDelegasiTugas && request.catatanDelegasiTugas !== '-'
+            ? ` (${request.catatanDelegasiTugas})`
+            : ''
+        }\n`
+      : '';
 
   return `Assalamu'alaikum warahmatullahi wabarakatuh,
 
@@ -46,20 +58,56 @@ Izin menyampaikan permohonan *${request.jenisPermohonan}* melalui *Sistem Inform
 • *Jabatan / Unit:* ${request.jabatan} — ${request.unit}
 • *Jenis & Kategori:* ${request.jenisPermohonan} (${request.kategoriKeperluan})
 • *Tanggal Pelaksanaan:* ${request.tanggalMulai} s/d ${request.tanggalSelesai}
-• *Durasi:* ${request.jumlahHari}
+• *Durasi Efektif:* ${request.jumlahHari}
 • *Alasan:* ${request.alasan}
-${statusNote}
+${delegationLine}${statusNote}
+⚡ *TAUTAN CEPAT PERSETUJUAN 1-KLIK (LANGSUNG BUKA SURAT):*
+👉 ${deepLinkUrl || appUrl}
+
 📱 *ARAHAN PERSETUJUAN & TANDA TANGAN DI HP:*
-1. Silakan buka tautan aplikasi: ${appUrl}
-2. Login menggunakan akun *${targetRole}* Anda.
-3. Buka menu *Daftar & Persetujuan*, lalu pilih nomor permohonan *${request.nomorPermohonan}*.
-4. Klik tombol ${actionButtonName}, pilih *SETUJUI* (atau *MINTA REVISI* / *TOLAK* beserta arahan catatan).
-5. Goreskan *Tanda Tangan Digital* langsung di layar HP Anda, lalu klik *Simpan Keputusan*.
+1. Klik tautan cepat di atas: ${deepLinkUrl || appUrl}
+2. Sistem otomatis membuka surat permohonan *${request.nomorPermohonan}*.
+3. Klik tombol ${actionButtonName}, pilih *SETUJUI* (atau *MINTA REVISI* / *TOLAK*).
+4. Goreskan *Tanda Tangan Digital* langsung di layar HP Anda, lalu klik *Simpan Keputusan*.
 
 Atas perhatian, arahan, dan kebijaksanaannya, saya ucapkan *Jazakumullahu Khairan*.
 Wassalamu'alaikum warahmatullahi wabarakatuh.
 
 Hormat saya,
+*${request.namaPegawai}*`;
+};
+
+/**
+ * Menghasilkan teks pesan WhatsApp kepada Pegawai Pengganti (Badal / Inval Tugas)
+ */
+export const generateSubstituteDelegationMessageText = (
+  request: LeaveRequest
+): string => {
+  const appUrl = typeof window !== 'undefined' ? window.location.origin : '';
+  const deepLinkUrl = appUrl
+    ? `${appUrl}/?req=${encodeURIComponent(request.idPermohonan)}`
+    : '';
+
+  return `Assalamu'alaikum warahmatullahi wabarakatuh,
+
+Yth. Ustadz/Ustadzah *${request.namaPegawaiPengganti || 'Rekan Pegawai'}*
+Di tempat.
+
+Semoga antum senantiasa dalam lindungan Allah Subhanahu wa Ta'ala.
+
+Sehubungan dengan pengajuan *${request.jenisPermohonan} (${request.kategoriKeperluan})* saya pada:
+• *No. Surat:* ${request.nomorPermohonan}
+• *Nama Pemohon:* ${request.namaPegawai} (${request.jabatan} - ${request.unit})
+• *Tanggal:* ${request.tanggalMulai} s/d ${request.tanggalSelesai} (${request.jumlahHari})
+• *Rincian Pendelegasian / Badal Tugas:* ${
+    request.catatanDelegasiTugas || request.keteranganTambahan || 'Mohon bantuan badal/inval tugas selama izin berlangsung.'
+  }
+
+🔗 *Lihat Surat Permohonan:* ${deepLinkUrl || appUrl}
+
+Mohon kesediaan dan bantuannya sebagai *Pegawai Pengganti (Badal/Inval)* selama rentang tanggal tersebut. Atas bantuan dan kerja samanya, saya ucapkan *Jazakumullahu Khairan*.
+
+Wassalamu'alaikum warahmatullahi wabarakatuh.
 *${request.namaPegawai}*`;
 };
 

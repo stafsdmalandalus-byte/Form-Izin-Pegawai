@@ -1,6 +1,15 @@
 import { Employee, LeaveRequest, UserAccount } from '../types';
-import { FullDatabaseStore, recordActivity, saveDatabase } from './databaseService';
-import { generateFollowUpMessageText } from '../utils/messageShareHelper';
+import {
+  ARSIP_IZIN_ISO_FOLDER_URL,
+  FullDatabaseStore,
+  recordActivity,
+  resolveClearArchiveUrl,
+  saveDatabase,
+} from './databaseService';
+import {
+  generateFollowUpMessageText,
+  generateSubstituteDelegationMessageText,
+} from '../utils/messageShareHelper';
 
 export type WhatsAppAutomationEvent =
   | 'PERMOHONAN_BARU'
@@ -104,6 +113,11 @@ const buildApplicantStatusMessage = (
   actorName: string
 ): string => {
   const appUrl = typeof window !== 'undefined' ? window.location.origin : '';
+  const deepLinkUrl = appUrl
+    ? `${appUrl}/?req=${encodeURIComponent(req.idPermohonan)}`
+    : appUrl;
+  const archiveDriveUrl = resolveClearArchiveUrl(req.urlPdf || ARSIP_IZIN_ISO_FOLDER_URL);
+
   return `Assalamu'alaikum warahmatullahi wabarakatuh,
 
 Yth. Ustadz/Ustadzah *${req.namaPegawai}*
@@ -122,10 +136,10 @@ Status permohonan izin/cuti Anda telah diperbarui:
 
 ${
   req.statusPermohonan === 'DISETUJUI' || req.statusPermohonan === 'DIARSIPKAN'
-    ? '✅ Dokumen Surat Resmi *AIS-FRM-SEK.02.11* (lengkap dengan 3 tanda tangan) sudah siap diunduh dalam format PDF & Word A4 pada menu *Arsip Dokumen PDF*.'
+    ? `✅ Dokumen Surat Resmi *AIS-FRM-SEK.02.11* (lengkap dengan 3 tanda tangan) sudah siap diunduh dalam format PDF & Word A4.\n📂 *Folder Google Drive (Arsip izin ISO):* ${archiveDriveUrl}`
     : ''
 }
-🔗 Buka Aplikasi: ${appUrl}
+🔗 *Buka Langsung Surat Ini:* ${deepLinkUrl}
 
 Jazakumullahu Khairan.`;
 };
@@ -176,6 +190,25 @@ export const triggerWhatsAppAutomation = async (
       recipientPhone: supPhone,
       messageText: supMessage,
     });
+
+    // Jika ada Pegawai Pengganti (Badal / Inval), kirim juga notifikasi otomatis ke Pegawai Pengganti
+    if (request.namaPegawaiPengganti && request.namaPegawaiPengganti !== '-') {
+      const subEmp = store.MASTER_PEGAWAI.find(
+        (e) =>
+          e.idPegawai === request.idPegawaiPengganti ||
+          e.namaLengkap === request.namaPegawaiPengganti
+      );
+      const subPhone =
+        (request.noWaPegawaiPengganti && request.noWaPegawaiPengganti !== '-'
+          ? request.noWaPegawaiPengganti
+          : subEmp?.nomorTelepon) || '';
+      dispatches.push({
+        recipientRole: 'PEGAWAI PENGGANTI (BADAL)',
+        recipientName: request.namaPegawaiPengganti,
+        recipientPhone: subPhone,
+        messageText: generateSubstituteDelegationMessageText(request),
+      });
+    }
   } else if (event === 'KEPUTUSAN_ATASAN') {
     // 1. Jika disetujui Atasan Langsung -> Otomatis kirim WA ke Mudir Unit untuk tanda tangan tahap 3
     if (request.statusPermohonan === 'MENUNGGU PERSETUJUAN MUDIR') {
@@ -221,6 +254,29 @@ export const triggerWhatsAppAutomation = async (
         recipientName: supervisorEmp.namaLengkap,
         recipientPhone: supervisorEmp.nomorTelepon || '',
         messageText: buildApplicantStatusMessage(request, event, actor.namaPengguna),
+      });
+    }
+
+    // 3. Jika disetujui Mudir & ada Pegawai Pengganti (Badal), beri tahu Pegawai Pengganti bahwa izin resmi disetujui
+    if (
+      request.statusPermohonan === 'DISETUJUI' &&
+      request.namaPegawaiPengganti &&
+      request.namaPegawaiPengganti !== '-'
+    ) {
+      const subEmp = store.MASTER_PEGAWAI.find(
+        (e) =>
+          e.idPegawai === request.idPegawaiPengganti ||
+          e.namaLengkap === request.namaPegawaiPengganti
+      );
+      const subPhone =
+        (request.noWaPegawaiPengganti && request.noWaPegawaiPengganti !== '-'
+          ? request.noWaPegawaiPengganti
+          : subEmp?.nomorTelepon) || '';
+      dispatches.push({
+        recipientRole: 'PEGAWAI PENGGANTI (BADAL)',
+        recipientName: request.namaPegawaiPengganti,
+        recipientPhone: subPhone,
+        messageText: generateSubstituteDelegationMessageText(request),
       });
     }
   } else if (event === 'DIARSIPKAN_SDM') {
