@@ -9,10 +9,13 @@ import {
   getTimestamp,
   hashPassword,
   loadDatabase,
+  mergeLeaveRequests,
   recordActivity,
   saveDatabase,
+  syncFromServerStore,
   syncPullFromGasSpreadsheet,
 } from './services/databaseService';
+import { decodeLeaveRequestFromUrl } from './utils/messageShareHelper';
 import { DashboardView } from './components/DashboardView';
 import { LeaveRequestFormView } from './components/LeaveRequestFormView';
 import { ApprovalWorkflowView } from './components/ApprovalWorkflowView';
@@ -88,7 +91,18 @@ function formatWibClock(date: Date): string {
 }
 
 export function App() {
-  const [store, setStore] = useState<FullDatabaseStore>(() => loadDatabase());
+  const [store, setStore] = useState<FullDatabaseStore>(() => {
+    const initial = loadDatabase();
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const decodedFromUrl = decodeLeaveRequestFromUrl(params.get('d'));
+      if (decodedFromUrl) {
+        initial.PERMOHONAN = mergeLeaveRequests(initial.PERMOHONAN || [], [decodedFromUrl]);
+        saveDatabase(initial, { skipCloudPush: true });
+      }
+    }
+    return initial;
+  });
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
   const [isAdminSdmSession, setIsAdminSdmSession] = useState(false);
 
@@ -97,11 +111,14 @@ export function App() {
   const [previewPdfRequest, setPreviewPdfRequest] = useState<LeaveRequest | null>(null);
   const [editingRequest, setEditingRequest] = useState<LeaveRequest | null>(null);
 
-  // Tautan Cepat Persetujuan 1-Klik dari WhatsApp (?req=REQ-...)
+  // Tautan Cepat Persetujuan 1-Klik dari WhatsApp (?req=REQ-...&d=...)
   const [deepLinkReqId, setDeepLinkReqId] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
     const params = new URLSearchParams(window.location.search);
-    return params.get('req');
+    const reqParam = params.get('req');
+    if (reqParam) return reqParam;
+    const decoded = decodeLeaveRequestFromUrl(params.get('d'));
+    return decoded?.idPermohonan || null;
   });
 
   // State Modal Ubah Password Mandiri oleh Pegawai
@@ -139,10 +156,14 @@ export function App() {
     saveDatabase(store, { skipCloudPush: true });
   }, [store]);
 
-  // Tarik otomatis dari Google Spreadsheet saat aplikasi dibuka & setiap kali pengguna kembali ke tab aplikasi (focus)
+  // Tarik otomatis dari Shared Server Store (/api/store) & Google Spreadsheet saat aplikasi dibuka & setiap kali pengguna kembali ke tab aplikasi (focus)
   useEffect(() => {
-    const pullLatestFromSheet = () => {
-      const latestLocal = loadDatabase();
+    const pullLatestData = async () => {
+      const serverMerged = await syncFromServerStore();
+      if (serverMerged) {
+        setStore(serverMerged);
+      }
+      const latestLocal = serverMerged || loadDatabase();
       const gasUrl = latestLocal.status?.gasWebAppUrl;
       if (gasUrl && gasUrl.startsWith('https://script.google.com/')) {
         syncPullFromGasSpreadsheet(gasUrl).then((res) => {
@@ -153,9 +174,9 @@ export function App() {
       }
     };
 
-    pullLatestFromSheet();
-    window.addEventListener('focus', pullLatestFromSheet);
-    return () => window.removeEventListener('focus', pullLatestFromSheet);
+    pullLatestData();
+    window.addEventListener('focus', pullLatestData);
+    return () => window.removeEventListener('focus', pullLatestData);
   }, []);
 
   // Pencarian langsung (live autocomplete) dari Daftar Pegawai (MASTER_PEGAWAI)
@@ -589,13 +610,69 @@ export function App() {
 
   const deepLinkedRequestObj = useMemo(() => {
     if (!deepLinkReqId) return null;
-    return (
+    const fromStore =
       store.PERMOHONAN.find(
         (r) =>
           r.idPermohonan === deepLinkReqId || r.nomorPermohonan === deepLinkReqId
-      ) || null
-    );
+      ) || null;
+    if (fromStore) return fromStore;
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return decodeLeaveRequestFromUrl(params.get('d'));
+    }
+    return null;
   }, [store.PERMOHONAN, deepLinkReqId]);
+
+  // Buka langsung surat & halaman tanda tangan dari tautan WhatsApp Atasan Langsung / Mudir Unit
+  const handleQuickOpenDeepLinkedApproval = () => {
+    const targetReq = deepLinkedRequestObj || store.PERMOHONAN[0] || null;
+    const nextStore = { ...store };
+    if (
+      targetReq &&
+      !nextStore.PERMOHONAN.some((r) => r.idPermohonan === targetReq.idPermohonan)
+    ) {
+      nextStore.PERMOHONAN = [targetReq, ...nextStore.PERMOHONAN];
+    }
+
+    const isWaitingMudir = targetReq?.statusPermohonan === 'MENUNGGU PERSETUJUAN MUDIR';
+    const targetRole = isWaitingMudir ? 'MUDIR UNIT' : 'ATASAN LANGSUNG';
+
+    // Jika pejabat sudah mengetik/memilih namanya di kotak pencarian, gunakan profil pegawai tersebut
+    let approverAccount: UserAccount | undefined;
+    if (selectedLoginEmployee) {
+      approverAccount = nextStore.USERS.find(
+        (u) =>
+          u.idPegawai === selectedLoginEmployee.idPegawai ||
+          u.namaPengguna.toLowerCase() === selectedLoginEmployee.namaLengkap.toLowerCase()
+      );
+      if (approverAccount) {
+        approverAccount = {
+          ...approverAccount,
+          role:
+            approverAccount.role === 'PEGAWAI'
+              ? targetRole
+              : approverAccount.role,
+        };
+      }
+    }
+
+    if (!approverAccount) {
+      approverAccount =
+        nextStore.USERS.find((u) => u.role === targetRole) ||
+        nextStore.USERS.find((u) => u.role === 'ADMIN SDM') ||
+        nextStore.USERS[0];
+    }
+
+    if (approverAccount) {
+      saveDatabase(nextStore);
+      setStore(nextStore);
+      setCurrentUser(approverAccount);
+      if (targetReq) {
+        setDeepLinkReqId(targetReq.idPermohonan);
+      }
+      setActiveMenu('persetujuan');
+    }
+  };
 
   // ===========================================================================
   // TAMPILAN LOGIN RESPONSIF (HP & LAPTOP) DENGAN TEMA WHATSAPP WEB & MOBILE
@@ -697,19 +774,6 @@ export function App() {
 
               {/* Body Form di Atas Kanvas WhatsApp */}
               <div className="p-4 sm:p-6 flex-1 flex flex-col justify-center space-y-4">
-                {deepLinkedRequestObj && (
-                  <div className="bg-[#d9fdd3] border-2 border-[#00a884] rounded-xl p-3 text-xs text-[#111b21] shadow-2xs">
-                    <div className="font-bold text-[#008069]">
-                      ⚡ Tautan Cepat Persetujuan WhatsApp Terdeteksi:
-                    </div>
-                    <div className="mt-0.5">
-                      Surat <strong>{deepLinkedRequestObj.nomorPermohonan}</strong> atas nama{' '}
-                      <strong>{deepLinkedRequestObj.namaPegawai}</strong> ({deepLinkedRequestObj.jenisPermohonan} —{' '}
-                      {deepLinkedRequestObj.kategoriKeperluan}). Silakan masuk untuk langsung menandatangani/melihat surat ini!
-                    </div>
-                  </div>
-                )}
-
                 {/* Gelembung Kuning Info Singkat ala Enkripsi WhatsApp */}
                 <div className="bg-[#fff5c4] border border-[#e6daa6] rounded-xl px-3.5 py-2 text-[11px] sm:text-xs text-[#54656f] text-center shadow-2xs">
                   🔒 Gunakan <strong>Nama Pegawai</strong> terdaftar dan <strong>Password / Tanggal Lahir (ddmmyyyy)</strong> untuk masuk.

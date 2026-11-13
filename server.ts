@@ -1,5 +1,6 @@
 import express from 'express';
 import type { Request, Response } from 'express';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -8,6 +9,91 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const SHARED_STORE_FILE = '/tmp/alandalus_shared_store_v1.json';
+
+function getStatusRank(status?: string): number {
+  switch (status) {
+    case 'DIARSIPKAN':
+      return 60;
+    case 'DISETUJUI':
+    case 'DITOLAK MUDIR':
+    case 'PERLU REVISI MUDIR':
+      return 50;
+    case 'MENUNGGU PERSETUJUAN MUDIR':
+    case 'DITOLAK ATASAN':
+    case 'PERLU REVISI ATASAN':
+      return 40;
+    case 'MENUNGGU PERSETUJUAN ATASAN':
+      return 30;
+    case 'DRAFT':
+      return 10;
+    default:
+      return 0;
+  }
+}
+
+function mergeRequestRecords(existingList: any[], incomingList: any[]): any[] {
+  const map = new Map<string, any>();
+  for (const r of existingList || []) {
+    if (r && r.idPermohonan) {
+      map.set(r.idPermohonan, r);
+    }
+  }
+  for (const inc of incomingList || []) {
+    if (!inc || !inc.idPermohonan) continue;
+    const prev = map.get(inc.idPermohonan);
+    if (!prev) {
+      map.set(inc.idPermohonan, inc);
+      continue;
+    }
+    const prevRank = getStatusRank(prev.statusPermohonan);
+    const incRank = getStatusRank(inc.statusPermohonan);
+    const base = incRank >= prevRank ? { ...prev, ...inc } : { ...inc, ...prev };
+    // Pastikan tanda tangan dan field penting tidak pernah hilang
+    base.ttdPemohonUrl = inc.ttdPemohonUrl || prev.ttdPemohonUrl || '';
+    base.waktuTtdPemohon = inc.waktuTtdPemohon || prev.waktuTtdPemohon;
+    base.ttdAtasanUrl = inc.ttdAtasanUrl || prev.ttdAtasanUrl || '';
+    base.namaAtasan = inc.namaAtasan || prev.namaAtasan;
+    base.waktuTtdAtasan = inc.waktuTtdAtasan || prev.waktuTtdAtasan;
+    base.ttdMudirUrl = inc.ttdMudirUrl || prev.ttdMudirUrl || '';
+    base.namaMudir = inc.namaMudir || prev.namaMudir;
+    base.waktuTtdMudir = inc.waktuTtdMudir || prev.waktuTtdMudir;
+    base.nip = inc.nip || prev.nip || '';
+    base.idPegawaiPengganti = inc.idPegawaiPengganti || prev.idPegawaiPengganti || '-';
+    base.namaPegawaiPengganti = inc.namaPegawaiPengganti || prev.namaPegawaiPengganti || '-';
+    base.noWaPegawaiPengganti = inc.noWaPegawaiPengganti || prev.noWaPegawaiPengganti || '-';
+    base.catatanDelegasiTugas = inc.catatanDelegasiTugas || prev.catatanDelegasiTugas || '-';
+    if (
+      prev.urlPdf &&
+      String(prev.urlPdf).startsWith('https://drive.google.com/') &&
+      (!inc.urlPdf || inc.urlPdf === '-')
+    ) {
+      base.urlPdf = prev.urlPdf;
+    }
+    map.set(inc.idPermohonan, base);
+  }
+  return Array.from(map.values());
+}
+
+function loadSharedServerStore(): Record<string, any> | null {
+  try {
+    if (fs.existsSync(SHARED_STORE_FILE)) {
+      const raw = fs.readFileSync(SHARED_STORE_FILE, 'utf-8');
+      return JSON.parse(raw);
+    }
+  } catch {
+    // Abaikan jika belum ada
+  }
+  return null;
+}
+
+function saveSharedServerStore(nextStore: Record<string, any>): void {
+  try {
+    fs.writeFileSync(SHARED_STORE_FILE, JSON.stringify(nextStore), 'utf-8');
+  } catch {
+    // Abaikan jika gagal tulis
+  }
+}
 
 export interface WhatsAppDispatchRecord {
   id: string;
@@ -175,7 +261,91 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
-  app.use(express.json({ limit: '5mb' }));
+  app.use(express.json({ limit: '15mb' }));
+
+  // Endpoint 0: Shared Database Store antar HP/Browser (agar saat Atasan / Mudir klik link WA langsung muncul suratnya)
+  app.get('/api/store', (_req: Request, res: Response) => {
+    const shared = loadSharedServerStore();
+    res.json({
+      ok: true,
+      store: shared,
+    });
+  });
+
+  app.post('/api/store', (req: Request, res: Response) => {
+    try {
+      const incoming = req.body?.store;
+      const replaceAll = Boolean(req.body?.replaceAll);
+      if (!incoming || typeof incoming !== 'object') {
+        res.status(400).json({ ok: false, error: 'Payload store tidak valid.' });
+        return;
+      }
+
+      const existing = loadSharedServerStore();
+      if (!existing || replaceAll) {
+        saveSharedServerStore(incoming);
+        res.json({ ok: true, store: incoming });
+        return;
+      }
+
+      const mergedPermohonan = mergeRequestRecords(
+        existing.PERMOHONAN || [],
+        incoming.PERMOHONAN || []
+      );
+
+      const seenPersetujuan = new Map<string, any>();
+      for (const a of [...(incoming.PERSETUJUAN || []), ...(existing.PERSETUJUAN || [])]) {
+        if (a && a.idPersetujuan && !seenPersetujuan.has(a.idPersetujuan)) {
+          seenPersetujuan.set(a.idPersetujuan, a);
+        }
+      }
+
+      const seenArsip = new Map<string, any>();
+      for (const d of [...(incoming.ARSIP_DOKUMEN || []), ...(existing.ARSIP_DOKUMEN || [])]) {
+        const k = d?.idPermohonan || d?.idDokumen;
+        if (k && !seenArsip.has(k)) {
+          seenArsip.set(k, d);
+        }
+      }
+
+      const seenNotif = new Map<string, any>();
+      for (const n of [...(incoming.NOTIFIKASI || []), ...(existing.NOTIFIKASI || [])]) {
+        if (n && n.idNotifikasi && !seenNotif.has(n.idNotifikasi)) {
+          seenNotif.set(n.idNotifikasi, n);
+        }
+      }
+
+      const mergedStore = {
+        ...existing,
+        ...incoming,
+        status: {
+          ...(existing.status || {}),
+          ...(incoming.status || {}),
+          gasWebAppUrl:
+            incoming.status?.gasWebAppUrl || existing.status?.gasWebAppUrl || '',
+        },
+        MASTER_PEGAWAI:
+          Array.isArray(incoming.MASTER_PEGAWAI) &&
+          incoming.MASTER_PEGAWAI.length >= (existing.MASTER_PEGAWAI?.length || 0)
+            ? incoming.MASTER_PEGAWAI
+            : existing.MASTER_PEGAWAI || incoming.MASTER_PEGAWAI || [],
+        USERS:
+          Array.isArray(incoming.USERS) &&
+          incoming.USERS.length >= (existing.USERS?.length || 0)
+            ? incoming.USERS
+            : existing.USERS || incoming.USERS || [],
+        PERMOHONAN: mergedPermohonan,
+        PERSETUJUAN: Array.from(seenPersetujuan.values()),
+        ARSIP_DOKUMEN: Array.from(seenArsip.values()),
+        NOTIFIKASI: Array.from(seenNotif.values()),
+      };
+
+      saveSharedServerStore(mergedStore);
+      res.json({ ok: true, store: mergedStore });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || 'Gagal menyimpan store' });
+    }
+  });
 
   // Endpoint 1: Cek status konfigurasi API WhatsApp di sisi server & riwayat pengiriman otomatis
   app.get('/api/whatsapp/status', (_req: Request, res: Response) => {
@@ -328,23 +498,50 @@ async function startServer() {
   });
 
   if (process.env.NODE_ENV !== 'production') {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
+    let viteMiddleware: any = null;
+    const viteReadyPromise = (async () => {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      viteMiddleware = vite.middlewares;
+      return viteMiddleware;
+    })();
+
+    app.use(async (req, res, next) => {
+      try {
+        const mw = viteMiddleware || (await viteReadyPromise);
+        mw(req, res, next);
+      } catch (err) {
+        next(err);
+      }
     });
-    app.use(vite.middlewares);
+
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server Sistem Izin & Cuti Al-Andalus berjalan pada http://0.0.0.0:${PORT}`);
+      viteReadyPromise
+        .then(async () => {
+          try {
+            await fetch(`http://127.0.0.1:${PORT}/`);
+            await fetch(`http://127.0.0.1:${PORT}/src/main.tsx`);
+          } catch {
+            // Ignore warmup errors
+          }
+        })
+        .catch(() => {});
+    });
   } else {
     const distPath = path.join(__dirname, 'dist');
     app.use(express.static(distPath));
     app.get('*', (_req: Request, res: Response) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
-  }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server Sistem Izin & Cuti Al-Andalus berjalan pada http://0.0.0.0:${PORT}`);
-  });
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server Sistem Izin & Cuti Al-Andalus berjalan pada http://0.0.0.0:${PORT}`);
+    });
+  }
 }
 
 startServer();

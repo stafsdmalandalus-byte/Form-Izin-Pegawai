@@ -7,6 +7,7 @@ import {
   saveDatabase,
 } from './databaseService';
 import {
+  buildApprovalDeepLink,
   generateFollowUpMessageText,
   generateSubstituteDelegationMessageText,
 } from '../utils/messageShareHelper';
@@ -113,9 +114,7 @@ const buildApplicantStatusMessage = (
   actorName: string
 ): string => {
   const appUrl = typeof window !== 'undefined' ? window.location.origin : '';
-  const deepLinkUrl = appUrl
-    ? `${appUrl}/?req=${encodeURIComponent(req.idPermohonan)}`
-    : appUrl;
+  const deepLinkUrl = buildApprovalDeepLink(req) || appUrl;
   const archiveDriveUrl = resolveClearArchiveUrl(req.urlPdf || ARSIP_IZIN_ISO_FOLDER_URL);
 
   return `Assalamu'alaikum warahmatullahi wabarakatuh,

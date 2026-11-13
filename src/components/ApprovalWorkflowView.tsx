@@ -18,6 +18,7 @@ import {
   validatePermission,
 } from '../services/databaseService';
 import { SignaturePad } from './SignaturePad';
+import { OfficialLetterPaper } from './OfficialFormModal';
 import { formatOfficialPdfFilename, generateOfficialLeavePDF } from '../utils/pdfGenerator';
 import {
   fetchWhatsAppServerStatus,
@@ -81,12 +82,12 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
 
   const canActAsSupervisor = (req: LeaveRequest): boolean => {
     if (req.statusPermohonan !== 'MENUNGGU PERSETUJUAN ATASAN') return false;
-    return currentUser.role === 'ATASAN LANGSUNG' || currentUser.role === 'SUPER ADMIN';
+    return currentUser.statusAkun === 'Aktif';
   };
 
   const canActAsMudir = (req: LeaveRequest): boolean => {
     if (req.statusPermohonan !== 'MENUNGGU PERSETUJUAN MUDIR') return false;
-    return currentUser.role === 'MUDIR UNIT' || currentUser.role === 'SUPER ADMIN';
+    return currentUser.statusAkun === 'Aktif';
   };
 
   const canActAsAdminSdmArchive = (req: LeaveRequest): boolean => {
@@ -114,18 +115,27 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
         r.nomorPermohonan === initialFocusRequestId
     );
     if (targetReq) {
-      if (canActAsSupervisor(targetReq) || canActAsMudir(targetReq)) {
+      if (
+        targetReq.statusPermohonan === 'MENUNGGU PERSETUJUAN ATASAN' ||
+        targetReq.statusPermohonan === 'MENUNGGU PERSETUJUAN MUDIR'
+      ) {
         handleOpenDecisionPanel(targetReq, 'SETUJUI');
       } else {
         onPreviewOfficialPdf(targetReq);
       }
       if (onClearFocusRequest) onClearFocusRequest();
     }
-  }, [initialFocusRequestId, currentUser.userId]);
+  }, [initialFocusRequestId, currentUser.userId, store.PERMOHONAN]);
 
   const handleExecuteSupervisorDecision = () => {
     if (!selectedRequest) return;
-    const perm = validatePermission(currentUser, ['ATASAN LANGSUNG', 'SUPER ADMIN']);
+    const perm = validatePermission(currentUser, [
+      'PEGAWAI',
+      'ATASAN LANGSUNG',
+      'MUDIR UNIT',
+      'ADMIN SDM',
+      'SUPER ADMIN',
+    ]);
     if (!perm.valid) {
       setFeedback({ type: 'error', text: perm.message || 'Akses ditolak' });
       return;
@@ -267,7 +277,13 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
 
   const handleExecuteMudirDecision = () => {
     if (!selectedRequest) return;
-    const perm = validatePermission(currentUser, ['MUDIR UNIT', 'SUPER ADMIN']);
+    const perm = validatePermission(currentUser, [
+      'PEGAWAI',
+      'ATASAN LANGSUNG',
+      'MUDIR UNIT',
+      'ADMIN SDM',
+      'SUPER ADMIN',
+    ]);
     if (!perm.valid) {
       setFeedback({ type: 'error', text: perm.message || 'Akses ditolak' });
       return;
@@ -622,13 +638,18 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
         </div>
       )}
 
-      {/* PANEL TINDAKAN PERSETUJUAN ATASAN / MUDIR */}
+      {/* PANEL TINDAKAN PERSETUJUAN ATASAN / MUDIR (DILENGKAPI SURAT PERMOHONAN RESMI AIS-FRM-SEK.02.11) */}
       {selectedRequest && (
-        <div className="bg-white border-2 border-emerald-900 rounded-lg p-6 space-y-4 shadow-sm">
-          <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+        <div className="bg-white border-2 border-[#008069] rounded-xl p-4 sm:p-6 space-y-5 shadow-md">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
             <div>
+              <span className="inline-block px-2.5 py-0.5 rounded-full bg-[#d9fdd3] text-[#008069] text-[11px] font-bold mb-1">
+                {selectedRequest.statusPermohonan === 'MENUNGGU PERSETUJUAN ATASAN'
+                  ? 'TAHAP 2 · PERSETUJUAN & TANDA TANGAN ATASAN LANGSUNG'
+                  : 'TAHAP 3 · KEPUTUSAN & TANDA TANGAN MUDIR UNIT'}
+              </span>
               <h3 className="text-base font-bold text-slate-900">
-                Formulir Keputusan Persetujuan — {selectedRequest.nomorPermohonan}
+                Surat Permohonan Izin / Cuti — {selectedRequest.nomorPermohonan}
               </h3>
               <p className="text-xs text-slate-600">
                 Pemohon: <strong>{selectedRequest.namaPegawai}</strong> ({selectedRequest.bidang} /{' '}
@@ -641,36 +662,74 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
             <button
               type="button"
               onClick={() => setSelectedRequest(null)}
-              className="text-xs font-semibold text-slate-600 hover:text-slate-900"
+              className="px-3 py-1.5 rounded-lg bg-slate-100 text-xs font-semibold text-slate-700 hover:bg-slate-200"
             >
               Tutup Panel
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
-            {(['SETUJUI', 'MINTA REVISI', 'TOLAK'] as const).map((opt) => (
-              <button
-                key={opt}
-                type="button"
-                onClick={() => setDecisionType(opt)}
-                className={`px-3.5 py-2 text-xs font-semibold rounded-md border transition-colors ${
-                  decisionType === opt
-                    ? opt === 'SETUJUI'
-                      ? 'bg-emerald-900 text-white border-emerald-900'
-                      : opt === 'MINTA REVISI'
-                      ? 'bg-amber-600 text-white border-amber-600'
-                      : 'bg-red-700 text-white border-red-700'
-                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                }`}
-              >
-                {opt}
-              </button>
-            ))}
+          {/* TAMPILAN SURAT RESMI LENGKAP AGAR ATASAN / MUDIR LANGSUNG MELIHAT ISI SURAT YANG DITANDATANGANI */}
+          <div className="bg-slate-100 border border-slate-300 rounded-xl p-2.5 sm:p-4 max-h-[420px] overflow-y-auto">
+            <OfficialLetterPaper
+              compact
+              employee={store.MASTER_PEGAWAI.find(
+                (e) => e.idPegawai === selectedRequest.idPegawai
+              )}
+              request={{
+                ...selectedRequest,
+                ttdAtasanUrl:
+                  selectedRequest.statusPermohonan === 'MENUNGGU PERSETUJUAN ATASAN' &&
+                  decisionType === 'SETUJUI' &&
+                  approverSignature
+                    ? approverSignature
+                    : selectedRequest.ttdAtasanUrl,
+                namaAtasan:
+                  selectedRequest.statusPermohonan === 'MENUNGGU PERSETUJUAN ATASAN'
+                    ? currentUser.namaPengguna
+                    : selectedRequest.namaAtasan,
+                ttdMudirUrl:
+                  selectedRequest.statusPermohonan === 'MENUNGGU PERSETUJUAN MUDIR' &&
+                  decisionType === 'SETUJUI' &&
+                  approverSignature
+                    ? approverSignature
+                    : selectedRequest.ttdMudirUrl,
+                namaMudir:
+                  selectedRequest.statusPermohonan === 'MENUNGGU PERSETUJUAN MUDIR'
+                    ? currentUser.namaPengguna
+                    : selectedRequest.namaMudir,
+              }}
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-800 mb-1.5">
+              1. Pilih Keputusan ({selectedRequest.statusPermohonan === 'MENUNGGU PERSETUJUAN ATASAN' ? 'Atasan Langsung' : 'Mudir Unit'}):
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              {(['SETUJUI', 'MINTA REVISI', 'TOLAK'] as const).map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => setDecisionType(opt)}
+                  className={`px-4 py-2.5 text-xs font-bold rounded-lg border transition-colors ${
+                    decisionType === opt
+                      ? opt === 'SETUJUI'
+                        ? 'bg-[#008069] text-white border-[#008069]'
+                        : opt === 'MINTA REVISI'
+                        ? 'bg-amber-600 text-white border-amber-600'
+                        : 'bg-red-700 text-white border-red-700'
+                      : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                  }`}
+                >
+                  {opt === 'SETUJUI' ? '✓ SETUJUI SURAT INI' : opt}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">
-              Catatan / Alasan Keputusan{' '}
+              2. Catatan / Disposisi{' '}
               {(decisionType === 'TOLAK' || decisionType === 'MINTA REVISI') && (
                 <span className="text-red-600">(Wajib Diisi)</span>
               )}
@@ -690,19 +749,27 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
 
           {decisionType === 'SETUJUI' && (
             <SignaturePad
-              label={`Tanda Tangan Digital Penyetuju (${currentUser.role})`}
+              label={`3. Goreskan Tanda Tangan Digital (${
+                selectedRequest.statusPermohonan === 'MENUNGGU PERSETUJUAN ATASAN'
+                  ? 'Atasan Langsung'
+                  : 'Mudir Unit'
+              }: ${currentUser.namaPengguna})`}
               signerName={currentUser.namaPengguna}
-              signerRole={currentUser.role}
+              signerRole={
+                selectedRequest.statusPermohonan === 'MENUNGGU PERSETUJUAN ATASAN'
+                  ? 'ATASAN LANGSUNG'
+                  : 'MUDIR UNIT'
+              }
               value={approverSignature}
               onChange={setApproverSignature}
             />
           )}
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex flex-wrap justify-end gap-2 pt-2">
             <button
               type="button"
               onClick={() => setSelectedRequest(null)}
-              className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 rounded-md"
+              className="px-4 py-2.5 text-xs font-semibold text-slate-700 bg-slate-100 rounded-lg"
             >
               Batal
             </button>
@@ -710,17 +777,17 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
               <button
                 type="button"
                 onClick={handleExecuteSupervisorDecision}
-                className="px-5 py-2 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-md"
+                className="px-5 py-2.5 text-xs font-bold text-white bg-[#00a884] hover:bg-[#008069] rounded-lg shadow-xs"
               >
-                Simpan Keputusan Atasan Langsung
+                Simpan Keputusan & Tanda Tangan Atasan Langsung
               </button>
             ) : (
               <button
                 type="button"
                 onClick={handleExecuteMudirDecision}
-                className="px-5 py-2 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-md"
+                className="px-5 py-2.5 text-xs font-bold text-white bg-[#00a884] hover:bg-[#008069] rounded-lg shadow-xs"
               >
-                Simpan Keputusan Mudir Unit & Terbitkan PDF
+                Simpan Keputusan Mudir Unit & Terbitkan PDF Resmi
               </button>
             )}
           </div>

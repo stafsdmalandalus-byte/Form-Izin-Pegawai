@@ -617,11 +617,95 @@ export const loadDatabase = (): FullDatabaseStore => {
   }
 };
 
+const getLeaveStatusRank = (status?: string): number => {
+  switch (status) {
+    case 'DIARSIPKAN':
+      return 60;
+    case 'DISETUJUI':
+    case 'DITOLAK MUDIR':
+    case 'PERLU REVISI MUDIR':
+      return 50;
+    case 'MENUNGGU PERSETUJUAN MUDIR':
+    case 'DITOLAK ATASAN':
+    case 'PERLU REVISI ATASAN':
+      return 40;
+    case 'MENUNGGU PERSETUJUAN ATASAN':
+      return 30;
+    case 'DRAFT':
+      return 10;
+    default:
+      return 0;
+  }
+};
+
+export const mergeLeaveRequests = (
+  localList: LeaveRequest[],
+  remoteList: LeaveRequest[]
+): LeaveRequest[] => {
+  const map = new Map<string, LeaveRequest>();
+  for (const r of localList || []) {
+    if (r && r.idPermohonan) {
+      map.set(r.idPermohonan, r);
+    }
+  }
+  for (const rem of remoteList || []) {
+    if (!rem || !rem.idPermohonan) continue;
+    const loc = map.get(rem.idPermohonan);
+    if (!loc) {
+      map.set(rem.idPermohonan, rem);
+      continue;
+    }
+    const locRank = getLeaveStatusRank(loc.statusPermohonan);
+    const remRank = getLeaveStatusRank(rem.statusPermohonan);
+    const merged: LeaveRequest =
+      remRank >= locRank ? { ...loc, ...rem } : { ...rem, ...loc };
+
+    // Pertahankan tanda tangan digital & atribut tambahan yang tidak tersimpan di kolom standar Spreadsheet
+    merged.ttdPemohonUrl = rem.ttdPemohonUrl || loc.ttdPemohonUrl || '';
+    merged.waktuTtdPemohon = rem.waktuTtdPemohon || loc.waktuTtdPemohon;
+    merged.ttdAtasanUrl = rem.ttdAtasanUrl || loc.ttdAtasanUrl || '';
+    merged.namaAtasan = rem.namaAtasan || loc.namaAtasan;
+    merged.waktuTtdAtasan = rem.waktuTtdAtasan || loc.waktuTtdAtasan;
+    merged.ttdMudirUrl = rem.ttdMudirUrl || loc.ttdMudirUrl || '';
+    merged.namaMudir = rem.namaMudir || loc.namaMudir;
+    merged.waktuTtdMudir = rem.waktuTtdMudir || loc.waktuTtdMudir;
+    merged.nip = rem.nip || loc.nip || '';
+    merged.idPegawaiPengganti =
+      (rem.idPegawaiPengganti && rem.idPegawaiPengganti !== '-'
+        ? rem.idPegawaiPengganti
+        : loc.idPegawaiPengganti) || '-';
+    merged.namaPegawaiPengganti =
+      (rem.namaPegawaiPengganti && rem.namaPegawaiPengganti !== '-'
+        ? rem.namaPegawaiPengganti
+        : loc.namaPegawaiPengganti) || '-';
+    merged.noWaPegawaiPengganti =
+      (rem.noWaPegawaiPengganti && rem.noWaPegawaiPengganti !== '-'
+        ? rem.noWaPegawaiPengganti
+        : loc.noWaPegawaiPengganti) || '-';
+    merged.catatanDelegasiTugas =
+      (rem.catatanDelegasiTugas && rem.catatanDelegasiTugas !== '-'
+        ? rem.catatanDelegasiTugas
+        : loc.catatanDelegasiTugas) || '-';
+
+    map.set(rem.idPermohonan, merged);
+  }
+  return Array.from(map.values());
+};
+
 export const saveDatabase = (
   store: FullDatabaseStore,
-  options?: { skipCloudPush?: boolean }
+  options?: { skipCloudPush?: boolean; skipServerPush?: boolean }
 ): void => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+
+  if (!options?.skipServerPush && typeof window !== 'undefined') {
+    fetch('/api/store', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ store }),
+    }).catch(() => {});
+  }
+
   if (
     !options?.skipCloudPush &&
     store.status?.gasWebAppUrl &&
@@ -630,6 +714,88 @@ export const saveDatabase = (
     syncPushToGasSpreadsheet(store).catch(() => {
       // Tetap tersimpan aman di lokal jika koneksi internet sedang terputus
     });
+  }
+};
+
+/**
+ * Menarik & menggabungkan data terbaru dari Shared Server Store (/api/store)
+ * agar ketika Atasan Langsung atau Mudir membuka link persetujuan dari HP/browser berbeda,
+ * surat yang diajukan langsung tersedia tanpa menunggu sinkronisasi Spreadsheet.
+ */
+export const syncFromServerStore = async (): Promise<FullDatabaseStore | null> => {
+  try {
+    const res = await fetch('/api/store', { cache: 'no-store' });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const remote = json?.store as FullDatabaseStore | null;
+    const local = loadDatabase();
+
+    if (!remote || typeof remote !== 'object') {
+      // Jika server belum memiliki data tapi lokal punya permohonan, unggah ke server
+      if (local.PERMOHONAN.length > 0) {
+        fetch('/api/store', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ store: local }),
+        }).catch(() => {});
+      }
+      return local;
+    }
+
+    const mergedPermohonan = mergeLeaveRequests(
+      local.PERMOHONAN || [],
+      remote.PERMOHONAN || []
+    );
+
+    const seenPersetujuan = new Map<string, ApprovalRecord>();
+    for (const a of [...(remote.PERSETUJUAN || []), ...(local.PERSETUJUAN || [])]) {
+      if (a && a.idPersetujuan && !seenPersetujuan.has(a.idPersetujuan)) {
+        seenPersetujuan.set(a.idPersetujuan, a);
+      }
+    }
+
+    const seenArsip = new Map<string, DocumentArchive>();
+    for (const d of [...(remote.ARSIP_DOKUMEN || []), ...(local.ARSIP_DOKUMEN || [])]) {
+      const k = d?.idPermohonan || d?.idDokumen;
+      if (k && !seenArsip.has(k)) {
+        seenArsip.set(k, d);
+      }
+    }
+
+    const seenNotif = new Map<string, AppNotification>();
+    for (const n of [...(remote.NOTIFIKASI || []), ...(local.NOTIFIKASI || [])]) {
+      if (n && n.idNotifikasi && !seenNotif.has(n.idNotifikasi)) {
+        seenNotif.set(n.idNotifikasi, n);
+      }
+    }
+
+    const nextStore: FullDatabaseStore = {
+      ...local,
+      status: {
+        ...local.status,
+        ...(remote.status || {}),
+        gasWebAppUrl: local.status?.gasWebAppUrl || remote.status?.gasWebAppUrl || '',
+      },
+      MASTER_PEGAWAI:
+        Array.isArray(remote.MASTER_PEGAWAI) &&
+        remote.MASTER_PEGAWAI.length > (local.MASTER_PEGAWAI?.length || 0)
+          ? remote.MASTER_PEGAWAI
+          : local.MASTER_PEGAWAI,
+      USERS:
+        Array.isArray(remote.USERS) && remote.USERS.length > (local.USERS?.length || 0)
+          ? remote.USERS
+          : local.USERS,
+      PERMOHONAN: mergedPermohonan,
+      PERSETUJUAN: Array.from(seenPersetujuan.values()),
+      ARSIP_DOKUMEN: Array.from(seenArsip.values()),
+      NOTIFIKASI: Array.from(seenNotif.values()),
+    };
+
+    deduplicateStoreRecords(nextStore);
+    saveDatabase(nextStore, { skipCloudPush: true, skipServerPush: true });
+    return nextStore;
+  } catch {
+    return null;
   }
 };
 
@@ -861,6 +1027,11 @@ export const syncPullFromGasSpreadsheet = async (
         } as Employee;
       });
 
+    const mergedPermohonanFromSheet =
+      Array.isArray(data.PERMOHONAN) && data.PERMOHONAN.length > 0
+        ? mergeLeaveRequests(current.PERMOHONAN || [], data.PERMOHONAN)
+        : current.PERMOHONAN || [];
+
     const nextStore: FullDatabaseStore = {
       ...current,
       status: {
@@ -874,20 +1045,37 @@ export const syncPullFromGasSpreadsheet = async (
       },
       MASTER_PEGAWAI: pulledEmployees,
       USERS: pulledUsers,
-      PERMOHONAN: Array.isArray(data.PERMOHONAN) ? data.PERMOHONAN : current.PERMOHONAN,
+      PERMOHONAN: mergedPermohonanFromSheet,
       KETENTUAN_IZIN_CUTI: Array.isArray(data.KETENTUAN_IZIN_CUTI)
         ? data.KETENTUAN_IZIN_CUTI
         : current.KETENTUAN_IZIN_CUTI,
-      PERSETUJUAN: Array.isArray(data.PERSETUJUAN) ? data.PERSETUJUAN : current.PERSETUJUAN,
-      NOTIFIKASI: Array.isArray(data.NOTIFIKASI) ? data.NOTIFIKASI : current.NOTIFIKASI,
-      ARSIP_DOKUMEN: Array.isArray(data.ARSIP_DOKUMEN) ? data.ARSIP_DOKUMEN : current.ARSIP_DOKUMEN,
-      LOG_AKTIVITAS: Array.isArray(data.LOG_AKTIVITAS) ? data.LOG_AKTIVITAS : current.LOG_AKTIVITAS,
-      PENGATURAN: Array.isArray(data.PENGATURAN) ? data.PENGATURAN : current.PENGATURAN,
+      PERSETUJUAN:
+        Array.isArray(data.PERSETUJUAN) && data.PERSETUJUAN.length > 0
+          ? data.PERSETUJUAN
+          : current.PERSETUJUAN,
+      NOTIFIKASI:
+        Array.isArray(data.NOTIFIKASI) && data.NOTIFIKASI.length > 0
+          ? data.NOTIFIKASI
+          : current.NOTIFIKASI,
+      ARSIP_DOKUMEN:
+        Array.isArray(data.ARSIP_DOKUMEN) && data.ARSIP_DOKUMEN.length > 0
+          ? data.ARSIP_DOKUMEN
+          : current.ARSIP_DOKUMEN,
+      LOG_AKTIVITAS:
+        Array.isArray(data.LOG_AKTIVITAS) && data.LOG_AKTIVITAS.length > 0
+          ? data.LOG_AKTIVITAS
+          : current.LOG_AKTIVITAS,
+      PENGATURAN:
+        Array.isArray(data.PENGATURAN) && data.PENGATURAN.length > 0
+          ? data.PENGATURAN
+          : current.PENGATURAN,
     };
 
     ensureEmployeeUserSync(nextStore, { fromSpreadsheetPull: true });
-    // Simpan ke localStorage; jika di Spreadsheet tadi masih ada SHA256$ lama atau ada penghapusan timpang, sinkronkan balik agar kolom Password di Spreadsheet berubah jadi angka terbaca
-    saveDatabase(nextStore, { skipCloudPush: !hadLegacyHashInSpreadsheet && deletedFromUsersSheet.size === 0 });
+    // Simpan ke localStorage & Server Store
+    saveDatabase(nextStore, {
+      skipCloudPush: !hadLegacyHashInSpreadsheet && deletedFromUsersSheet.size === 0,
+    });
 
     return {
       ok: true,
@@ -1059,46 +1247,22 @@ export const setupDatabaseEngine = (
   };
 };
 
-// Role-filtered Leave Requests
+// Role-filtered Leave Requests:
+// Pastikan ketika Atasan Langsung, Mudir Unit, Admin SDM, atau pejabat yang menerima link persetujuan masuk,
+// seluruh pengajuan yang sudah dikirim (non-DRAFT) selalu tampil dan tidak pernah tersembunyi akibat perbedaan Unit / kosongnya kolom ID Atasan di Spreadsheet.
 export const getVisibleLeaveRequests = (
   store: FullDatabaseStore,
   actor: UserAccount
 ): LeaveRequest[] => {
+  const allRequests = store.PERMOHONAN || [];
   if (actor.role === 'ADMIN SDM' || actor.role === 'SUPER ADMIN') {
-    return store.PERMOHONAN;
+    return allRequests;
   }
-  if (actor.role === 'PEGAWAI') {
-    return store.PERMOHONAN.filter((r) => r.idPegawai === actor.idPegawai);
-  }
-  if (actor.role === 'ATASAN LANGSUNG') {
-    const subordinateIds = new Set(
-      store.MASTER_PEGAWAI.filter((e) => e.idAtasanLangsung === actor.idPegawai).map(
-        (e) => e.idPegawai
-      )
-    );
-    store.USERS.filter(
-      (u) => u.idAtasan === actor.idPegawai || u.idAtasan === actor.userId
-    ).forEach((u) => subordinateIds.add(u.idPegawai));
-    return store.PERMOHONAN.filter(
-      (r) => r.idPegawai === actor.idPegawai || subordinateIds.has(r.idPegawai)
-    );
-  }
-  if (actor.role === 'MUDIR UNIT') {
-    const mudirSubordinateIds = new Set(
-      store.MASTER_PEGAWAI.filter(
-        (e) => e.idMudirUnit === actor.idPegawai || e.unit === actor.unit
-      ).map((e) => e.idPegawai)
-    );
-    store.USERS.filter(
-      (u) => u.idMudir === actor.idPegawai || u.idMudir === actor.userId
-    ).forEach((u) => mudirSubordinateIds.add(u.idPegawai));
-    return store.PERMOHONAN.filter(
-      (r) =>
-        r.idPegawai === actor.idPegawai ||
-        (mudirSubordinateIds.has(r.idPegawai) && r.statusPermohonan !== 'DRAFT')
-    );
-  }
-  return [];
+  // Untuk Atasan Langsung, Mudir Unit, maupun Pegawai yang membuka daftar permohonan:
+  // Tampilkan semua permohonan aktif yang sudah diajukan (bukan DRAFT orang lain) serta DRAFT milik sendiri.
+  return allRequests.filter(
+    (r) => r.idPegawai === actor.idPegawai || r.statusPermohonan !== 'DRAFT'
+  );
 };
 
 export const getTimestamp = nowStr;

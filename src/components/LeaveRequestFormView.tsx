@@ -25,7 +25,6 @@ import {
 import { triggerWhatsAppAutomation } from '../services/whatsappNotificationService';
 import {
   AlertCircle,
-  CalendarCheck,
   CheckCircle2,
   FileText,
   Save,
@@ -165,23 +164,6 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
     () => calculateEffectiveLeaveDays(tanggalMulai, tanggalSelesai, pesantrenHolidays),
     [tanggalMulai, tanggalSelesai, pesantrenHolidays]
   );
-
-  // Hitung sisa kuota cuti tahunan 12 hari pegawai saat ini
-  const usedAnnualLeaveDays = useMemo(() => {
-    if (!linkedEmployee) return 0;
-    const currentYear = new Date().getFullYear().toString();
-    return store.PERMOHONAN.filter(
-      (r) =>
-        r.idPegawai === linkedEmployee.idPegawai &&
-        r.idPermohonan !== editingRequest?.idPermohonan &&
-        (r.statusPermohonan === 'DISETUJUI' || r.statusPermohonan === 'DIARSIPKAN') &&
-        r.jenisPermohonan === 'Cuti' &&
-        r.tanggalMulai.startsWith(currentYear)
-    ).reduce((acc, r) => {
-      const m = String(r.jumlahHari || '').match(/(\d+)/);
-      return acc + (m ? parseInt(m[1], 10) : 0);
-    }, 0);
-  }, [store.PERMOHONAN, linkedEmployee, editingRequest]);
 
   // Hitung jumlah hari secara otomatis, KECUALI untuk durasi Kebijaksanaan / Sesuai sakit umum (Aturan J.6)
   const calculatedJumlahHari = useMemo(() => {
@@ -634,46 +616,6 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
                 className="w-full px-3 py-2 text-sm border border-slate-200 bg-slate-100 text-slate-900 font-semibold rounded-md font-mono tabular-nums"
               />
             </div>
-          </div>
-
-          {/* Rincian Kalender Libur Resmi Pesantren & Kuota Cuti Tahunan 12 Hari */}
-          <div className="p-3.5 rounded-xl bg-[#f0f2f5] border border-[#d1d7db] text-xs space-y-2">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5 font-bold text-[#008069]">
-                <CalendarCheck className="w-4 h-4 shrink-0" />
-                <span>
-                  Perhitungan Hari Efektif & Kuota Cuti Tahunan (12 Hari)
-                </span>
-              </div>
-              <span className="px-2.5 py-0.5 rounded-full bg-[#d9fdd3] text-[#008069] font-mono font-bold">
-                Terpakai: {usedAnnualLeaveDays} Hari · Sisa Kuota Cuti: {Math.max(0, 12 - usedAnnualLeaveDays)} dari 12 Hari
-              </span>
-            </div>
-            {effectiveCalc.valid && (
-              <div className="text-[#54656f] flex flex-wrap items-center gap-x-4 gap-y-1">
-                <span>
-                  • Rentang Kalender: <strong className="text-[#111b21]">{effectiveCalc.totalCalendarDays} hari</strong>
-                </span>
-                <span>
-                  • Libur Resmi Pesantren Terlewati:{' '}
-                  <strong className="text-[#008069]">
-                    {effectiveCalc.skippedHolidays.length} hari (Tidak Memotong Kuota Cuti)
-                  </strong>
-                </span>
-                <span>
-                  • Hari Efektif Terhitung:{' '}
-                  <strong className="text-[#111b21]">{effectiveCalc.effectiveDays} hari</strong>
-                </span>
-              </div>
-            )}
-            {effectiveCalc.skippedHolidays.length > 0 && (
-              <div className="p-2 rounded-lg bg-[#d9fdd3]/70 border border-[#b7f0ad] text-[#111b21]">
-                <strong>Hari Libur Pesantren yang dikecualikan otomatis:</strong>{' '}
-                {effectiveCalc.skippedHolidays
-                  .map((h) => `${h.tanggal} (${h.keterangan})`)
-                  .join(', ')}
-              </div>
-            )}
           </div>
 
           <div>
