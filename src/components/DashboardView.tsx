@@ -1,6 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { LeaveRequest, UserAccount } from '../types';
-import { FullDatabaseStore, getVisibleLeaveRequests } from '../services/databaseService';
+import {
+  FullDatabaseStore,
+  getVisibleLeaveRequests,
+  isRequestOwnedByUser,
+} from '../services/databaseService';
 import {
   PlusCircle,
   Eye,
@@ -38,20 +42,39 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onPreviewOfficialPdf,
   onEditRevisionRequest,
 }) => {
+  const isAdminSdm =
+    currentUser.role === 'ADMIN SDM' || currentUser.role === 'SUPER ADMIN';
+
   // Filter states for Admin SDM / Dashboard
   const [filterDate, setFilterDate] = useState('');
   const [filterMonth, setFilterMonth] = useState('SEMUA');
-  const [filterYear, setFilterYear] = useState('2026');
+  const [filterYear, setFilterYear] = useState('SEMUA');
   const [filterBidang, setFilterBidang] = useState('SEMUA');
   const [filterUnit, setFilterUnit] = useState('SEMUA');
   const [filterJenis, setFilterJenis] = useState('SEMUA');
   const [filterStatus, setFilterStatus] = useState('SEMUA');
+  const [dashboardScope, setDashboardScope] = useState<'MINE' | 'ALL'>(
+    isAdminSdm ? 'ALL' : 'MINE'
+  );
   const [shareMessageRequest, setShareMessageRequest] = useState<LeaveRequest | null>(null);
 
-  const roleRequests = useMemo(
+  const myOwnRequests = useMemo(
+    () => (store.PERMOHONAN || []).filter((r) => isRequestOwnedByUser(r, currentUser, store)),
+    [store, currentUser]
+  );
+
+  const allRoleRequests = useMemo(
     () => getVisibleLeaveRequests(store, currentUser),
     [store, currentUser]
   );
+
+  // Pegawai selalu hanya melihat riwayat pengajuan miliknya sendiri di Beranda
+  const roleRequests = useMemo(() => {
+    if (currentUser.role === 'PEGAWAI') {
+      return myOwnRequests;
+    }
+    return dashboardScope === 'MINE' ? myOwnRequests : allRoleRequests;
+  }, [currentUser.role, dashboardScope, myOwnRequests, allRoleRequests]);
 
   const filteredRequests = useMemo(() => {
     return roleRequests.filter((r) => {
@@ -591,21 +614,49 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* PERCAKAPAN / GELEMBUNG CHAT RIWAYAT PERMOHONAN IZIN & CUTI ALA WHATSAPP */}
       <div className="space-y-3">
-        <div className="flex items-center justify-between px-1">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-1">
           <h3 className="text-xs font-bold uppercase tracking-wider text-[#54656f]">
-            {currentUser.role === 'PEGAWAI'
-              ? 'Gelembung Chat Riwayat Pengajuan Saya'
-              : 'Percakapan Permohonan Izin & Cuti Terbaru'}
+            {currentUser.role === 'PEGAWAI' || dashboardScope === 'MINE'
+              ? `Gelembung Chat Riwayat Pengajuan Saya (${currentUser.namaPengguna})`
+              : 'Percakapan Permohonan Izin & Cuti Seluruh Pegawai'}
           </h3>
-          <span className="text-xs text-[#54656f] font-mono tabular-nums">
-            {filteredRequests.length} Pesan Permohonan
-          </span>
+          <div className="flex items-center gap-2">
+            {currentUser.role !== 'PEGAWAI' && (
+              <div className="inline-flex rounded-lg bg-white border border-[#d1d7db] p-0.5 text-[11px] font-bold">
+                <button
+                  type="button"
+                  onClick={() => setDashboardScope('MINE')}
+                  className={`px-2.5 py-1 rounded-md transition-colors ${
+                    dashboardScope === 'MINE'
+                      ? 'bg-[#008069] text-white'
+                      : 'text-[#54656f] hover:bg-[#f0f2f5]'
+                  }`}
+                >
+                  Riwayat Saya ({myOwnRequests.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDashboardScope('ALL')}
+                  className={`px-2.5 py-1 rounded-md transition-colors ${
+                    dashboardScope === 'ALL'
+                      ? 'bg-[#008069] text-white'
+                      : 'text-[#54656f] hover:bg-[#f0f2f5]'
+                  }`}
+                >
+                  Semua Pegawai ({allRoleRequests.length})
+                </button>
+              </div>
+            )}
+            <span className="text-xs text-[#54656f] font-mono tabular-nums">
+              {filteredRequests.length} Pesan Permohonan
+            </span>
+          </div>
         </div>
 
         {filteredRequests.length === 0 ? (
           <div className="bg-white border border-[#d1d7db] rounded-xl p-8 text-center space-y-2 shadow-2xs">
             <p className="text-sm font-bold text-[#111b21]">
-              Belum ada pesan permohonan izin atau cuti.
+              Belum ada riwayat permohonan izin atau cuti pada akun Anda.
             </p>
             <p className="text-xs text-[#667781]">
               Klik tombol hijau <strong>Kirim Permohonan Baru</strong> untuk mengirim pengajuan izin atau cuti seperti mengirim pesan WhatsApp.
@@ -614,7 +665,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         ) : (
           <div className="space-y-3">
             {filteredRequests.map((req) => {
-              const isMine = req.idPegawai === currentUser.idPegawai;
+              const isMine = isRequestOwnedByUser(req, currentUser, store);
               const isApproved =
                 req.statusPermohonan === 'DISETUJUI' || req.statusPermohonan === 'DIARSIPKAN';
               const isRejected =

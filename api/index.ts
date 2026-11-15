@@ -58,6 +58,50 @@ function detectConfiguredProvider() {
   };
 }
 
+function getStatusRank(status?: string): number {
+  switch (status) {
+    case 'DIARSIPKAN':
+      return 60;
+    case 'DISETUJUI':
+    case 'DITOLAK MUDIR':
+    case 'PERLU REVISI MUDIR':
+      return 50;
+    case 'MENUNGGU PERSETUJUAN MUDIR':
+    case 'DITOLAK ATASAN':
+    case 'PERLU REVISI ATASAN':
+      return 40;
+    case 'MENUNGGU PERSETUJUAN ATASAN':
+      return 30;
+    case 'DRAFT':
+      return 10;
+    default:
+      return 0;
+  }
+}
+
+function mergeRequestRecords(existingList: any[], incomingList: any[]): any[] {
+  const map = new Map<string, any>();
+  for (const r of existingList || []) {
+    if (r && r.idPermohonan) map.set(r.idPermohonan, r);
+  }
+  for (const inc of incomingList || []) {
+    if (!inc || !inc.idPermohonan) continue;
+    const prev = map.get(inc.idPermohonan);
+    if (!prev) {
+      map.set(inc.idPermohonan, inc);
+    } else {
+      const prevRank = getStatusRank(prev.statusPermohonan);
+      const incRank = getStatusRank(inc.statusPermohonan);
+      const merged = incRank >= prevRank ? { ...prev, ...inc } : { ...inc, ...prev };
+      merged.ttdPemohonUrl = inc.ttdPemohonUrl || prev.ttdPemohonUrl || '';
+      merged.ttdAtasanUrl = inc.ttdAtasanUrl || prev.ttdAtasanUrl || '';
+      merged.ttdMudirUrl = inc.ttdMudirUrl || prev.ttdMudirUrl || '';
+      map.set(inc.idPermohonan, merged);
+    }
+  }
+  return Array.from(map.values());
+}
+
 // Shared Store endpoints
 app.get('/api/store', (_req: Request, res: Response) => {
   try {
@@ -78,8 +122,32 @@ app.post('/api/store', (req: Request, res: Response) => {
       res.status(400).json({ ok: false, error: 'Invalid store payload' });
       return;
     }
-    fs.writeFileSync(SHARED_STORE_FILE, JSON.stringify(incoming), 'utf-8');
-    res.json({ ok: true, store: incoming });
+
+    let current: any = null;
+    if (fs.existsSync(SHARED_STORE_FILE)) {
+      try {
+        current = JSON.parse(fs.readFileSync(SHARED_STORE_FILE, 'utf-8'));
+      } catch {
+        current = null;
+      }
+    }
+
+    if (!current) {
+      current = incoming;
+    } else {
+      const mergedPermohonan = mergeRequestRecords(
+        current.PERMOHONAN || [],
+        incoming.PERMOHONAN || []
+      );
+      current = {
+        ...current,
+        ...incoming,
+        PERMOHONAN: mergedPermohonan,
+      };
+    }
+
+    fs.writeFileSync(SHARED_STORE_FILE, JSON.stringify(current), 'utf-8');
+    res.json({ ok: true, store: current });
   } catch (err: any) {
     res.status(500).json({ ok: false, error: err?.message });
   }

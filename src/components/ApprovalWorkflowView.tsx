@@ -12,6 +12,7 @@ import {
   FullDatabaseStore,
   getTimestamp,
   getVisibleLeaveRequests,
+  isRequestOwnedByUser,
   recordActivity,
   saveDatabase,
   uploadPdfToGasDriveFolder,
@@ -59,6 +60,9 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
   onClearFocusRequest,
 }) => {
   const [selectedRequest, setSelectedRequest] = useState<LeaveRequest | null>(null);
+  const [stickyFocusReqId, setStickyFocusReqId] = useState<string | null>(
+    initialFocusRequestId || null
+  );
   const [shareMessageRequest, setShareMessageRequest] = useState<LeaveRequest | null>(null);
   const [decisionType, setDecisionType] = useState<'SETUJUI' | 'TOLAK' | 'MINTA REVISI'>('SETUJUI');
   const [catatan, setCatatan] = useState('');
@@ -78,16 +82,44 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
     refreshWaStatus();
   }, [store.PERMOHONAN.length]);
 
-  const visibleRequests = getVisibleLeaveRequests(store, currentUser);
+  useEffect(() => {
+    if (initialFocusRequestId) {
+      setStickyFocusReqId(initialFocusRequestId);
+    }
+  }, [initialFocusRequestId]);
+
+  const visibleRequests = getVisibleLeaveRequests(
+    store,
+    currentUser,
+    stickyFocusReqId || initialFocusRequestId
+  );
 
   const canActAsSupervisor = (req: LeaveRequest): boolean => {
     if (req.statusPermohonan !== 'MENUNGGU PERSETUJUAN ATASAN') return false;
-    return currentUser.statusAkun === 'Aktif';
+    if (currentUser.statusAkun !== 'Aktif') return false;
+    if (
+      currentUser.role === 'ATASAN LANGSUNG' ||
+      currentUser.role === 'MUDIR UNIT' ||
+      currentUser.role === 'ADMIN SDM' ||
+      currentUser.role === 'SUPER ADMIN'
+    ) {
+      return true;
+    }
+    // Jika akun masih tercatat PEGAWAI tapi membuka surat bawahan (bukan milik sendiri) via link WA atau idAtasanLangsung
+    return !isRequestOwnedByUser(req, currentUser, store);
   };
 
   const canActAsMudir = (req: LeaveRequest): boolean => {
     if (req.statusPermohonan !== 'MENUNGGU PERSETUJUAN MUDIR') return false;
-    return currentUser.statusAkun === 'Aktif';
+    if (currentUser.statusAkun !== 'Aktif') return false;
+    if (
+      currentUser.role === 'MUDIR UNIT' ||
+      currentUser.role === 'ADMIN SDM' ||
+      currentUser.role === 'SUPER ADMIN'
+    ) {
+      return true;
+    }
+    return !isRequestOwnedByUser(req, currentUser, store);
   };
 
   const canActAsAdminSdmArchive = (req: LeaveRequest): boolean => {

@@ -1247,22 +1247,104 @@ export const setupDatabaseEngine = (
   };
 };
 
+/**
+ * Memeriksa secara akurat apakah suatu permohonan izin/cuti adalah milik pengguna yang sedang login
+ * (mencocokkan ID Pegawai, NIP, maupun Nama Lengkap secara case-insensitive).
+ */
+export const isRequestOwnedByUser = (
+  req: LeaveRequest,
+  actor: UserAccount,
+  store?: FullDatabaseStore
+): boolean => {
+  const actorEmpId = String(actor.idPegawai || '').trim().toLowerCase();
+  const actorName = String(actor.namaPengguna || '').trim().toLowerCase();
+  const reqEmpId = String(req.idPegawai || '').trim().toLowerCase();
+  const reqNip = String(req.nip || '').trim().toLowerCase();
+  const reqName = String(req.namaPegawai || '').trim().toLowerCase();
+
+  if (actorEmpId && (reqEmpId === actorEmpId || reqNip === actorEmpId)) {
+    return true;
+  }
+  if (actorName && reqName && actorName === reqName) {
+    return true;
+  }
+
+  if (store && Array.isArray(store.MASTER_PEGAWAI)) {
+    const linkedEmp = store.MASTER_PEGAWAI.find(
+      (e) =>
+        String(e.idPegawai || '').trim().toLowerCase() === actorEmpId ||
+        String(e.nip || '').trim().toLowerCase() === actorEmpId ||
+        String(e.namaLengkap || '').trim().toLowerCase() === actorName
+    );
+    if (linkedEmp) {
+      const empId = String(linkedEmp.idPegawai || '').trim().toLowerCase();
+      const empNip = String(linkedEmp.nip || '').trim().toLowerCase();
+      if (
+        (empId && (reqEmpId === empId || reqNip === empId)) ||
+        (empNip && (reqEmpId === empNip || reqNip === empNip))
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+};
+
 // Role-filtered Leave Requests:
-// Pastikan ketika Atasan Langsung, Mudir Unit, Admin SDM, atau pejabat yang menerima link persetujuan masuk,
-// seluruh pengajuan yang sudah dikirim (non-DRAFT) selalu tampil dan tidak pernah tersembunyi akibat perbedaan Unit / kosongnya kolom ID Atasan di Spreadsheet.
+// - Pegawai biasa (PEGAWAI) HANYA melihat riwayat pengajuan milik mereka sendiri (kecuali jika ditunjuk sebagai Atasan/Mudir dari pemohon atau membuka tautan persetujuan spesifik ?req=...).
+// - Atasan Langsung, Mudir Unit, Admin SDM, dan Super Admin dapat melihat permohonan yang diajukan untuk diproses/disetujui.
 export const getVisibleLeaveRequests = (
   store: FullDatabaseStore,
-  actor: UserAccount
+  actor: UserAccount,
+  focusRequestId?: string | null
 ): LeaveRequest[] => {
   const allRequests = store.PERMOHONAN || [];
   if (actor.role === 'ADMIN SDM' || actor.role === 'SUPER ADMIN') {
     return allRequests;
   }
-  // Untuk Atasan Langsung, Mudir Unit, maupun Pegawai yang membuka daftar permohonan:
-  // Tampilkan semua permohonan aktif yang sudah diajukan (bukan DRAFT orang lain) serta DRAFT milik sendiri.
-  return allRequests.filter(
-    (r) => r.idPegawai === actor.idPegawai || r.statusPermohonan !== 'DRAFT'
-  );
+
+  if (actor.role === 'MUDIR UNIT' || actor.role === 'ATASAN LANGSUNG') {
+    return allRequests.filter(
+      (r) => isRequestOwnedByUser(r, actor, store) || r.statusPermohonan !== 'DRAFT'
+    );
+  }
+
+  // Untuk PEGAWAI: tampilkan HANYA riwayat pengajuan miliknya sendiri
+  // (ditambah jika pegawai tersebut secara spesifik tercatat sebagai idAtasanLangsung/idMudirUnit dari pemohon atau sedang membuka link WA ?req=...)
+  const actorIdLower = String(actor.idPegawai || '').trim().toLowerCase();
+  const focusClean = String(focusRequestId || '').trim();
+
+  return allRequests.filter((r) => {
+    if (isRequestOwnedByUser(r, actor, store)) {
+      return true;
+    }
+    if (
+      focusClean &&
+      (r.idPermohonan === focusClean || r.nomorPermohonan === focusClean)
+    ) {
+      return true;
+    }
+    if (r.statusPermohonan !== 'DRAFT' && actorIdLower) {
+      const applicant = (store.MASTER_PEGAWAI || []).find(
+        (e) =>
+          e.idPegawai === r.idPegawai ||
+          (r.nip && e.nip === r.nip) ||
+          e.namaLengkap.trim().toLowerCase() === r.namaPegawai.trim().toLowerCase()
+      );
+      if (applicant) {
+        const supId = String(applicant.idAtasanLangsung || '').trim().toLowerCase();
+        const mudId = String(applicant.idMudirUnit || '').trim().toLowerCase();
+        if (
+          (supId && supId !== '-' && supId === actorIdLower) ||
+          (mudId && mudId !== '-' && mudId === actorIdLower)
+        ) {
+          return true;
+        }
+      }
+    }
+    return false;
+  });
 };
 
 export const getTimestamp = nowStr;

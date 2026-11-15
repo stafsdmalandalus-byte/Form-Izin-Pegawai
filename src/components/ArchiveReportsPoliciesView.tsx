@@ -7,6 +7,7 @@ import {
   getPesantrenHolidays,
   getTimestamp,
   getVisibleLeaveRequests,
+  isRequestOwnedByUser,
   recordActivity,
   resolveClearArchiveUrl,
   saveDatabase,
@@ -135,12 +136,8 @@ export const ArchiveReportsPoliciesView: React.FC<ArchiveReportsPoliciesViewProp
     const base = getVisibleLeaveRequests(store, currentUser);
     // Pada menu Arsip Dokumen, Pegawai (selain Admin SDM) hanya bisa melihat arsip dokumen milik mereka sendiri
     if (mode === 'arsip' && !isAdminSdm) {
-      return store.PERMOHONAN.filter(
-        (r) =>
-          r.idPegawai === currentUser.idPegawai ||
-          r.nip === currentUser.idPegawai ||
-          r.namaPegawai.trim().toLowerCase() ===
-            currentUser.namaPengguna.trim().toLowerCase()
+      return (store.PERMOHONAN || []).filter((r) =>
+        isRequestOwnedByUser(r, currentUser, store)
       );
     }
     return base;
