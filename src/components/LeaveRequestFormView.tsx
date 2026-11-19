@@ -34,6 +34,7 @@ import {
   Smartphone,
   UserCheck,
   Lock,
+  Eye,
 } from 'lucide-react';
 
 interface LeaveRequestFormViewProps {
@@ -86,7 +87,7 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
     editingRequest?.keteranganTambahan || ''
   );
   const [lampiranName, setLampiranName] = useState<string>(editingRequest?.lampiran || '');
-  const [signatureDataUrl, setSignatureDataUrl] = useState<string>(
+  const [applicantSignature, setApplicantSignature] = useState<string>(
     editingRequest?.ttdPemohonUrl || ''
   );
 
@@ -106,7 +107,7 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
   const [signatureHighlightError, setSignatureHighlightError] = useState(false);
   const signatureSectionRef = useRef<HTMLDivElement | null>(null);
 
-  const isApplicantSigned = hasValidSignature(signatureDataUrl);
+  const isApplicantSigned = hasValidSignature(applicantSignature);
 
   // Daftar rekan pegawai aktif untuk dipilih sebagai Pegawai Pengganti (Badal / Inval)
   const colleagueOptions = useMemo(() => {
@@ -126,7 +127,7 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
     [colleagueOptions, idPegawaiPengganti]
   );
 
-  // Cari data Atasan Langsung untuk pengiriman langsung ke WhatsApp saat klik Konfirmasi & Kirim Sekarang
+  // Cari data Atasan Langsung untuk tanda tangan & pengiriman langsung ke WhatsApp
   const supervisorEmployee: Employee | undefined = useMemo(() => {
     if (!linkedEmployee) return undefined;
     return (
@@ -262,8 +263,14 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
       urlPdf: '-',
       tanggalDisetujui: '-',
       tanggalDiarsipkan: '-',
-      ttdPemohonUrl: signatureDataUrl,
-      waktuTtdPemohon: signatureDataUrl ? ts : undefined,
+      ttdPemohonUrl: applicantSignature,
+      waktuTtdPemohon: isApplicantSigned ? ts : undefined,
+      ttdAtasanUrl: editingRequest?.ttdAtasanUrl,
+      namaAtasan: editingRequest?.namaAtasan,
+      waktuTtdAtasan: editingRequest?.waktuTtdAtasan,
+      ttdMudirUrl: editingRequest?.ttdMudirUrl,
+      namaMudir: editingRequest?.namaMudir,
+      waktuTtdMudir: editingRequest?.waktuTtdMudir,
       idPegawaiPengganti: selectedSubstituteEmployee?.idPegawai || '-',
       namaPegawaiPengganti: selectedSubstituteEmployee?.namaLengkap || '-',
       noWaPegawaiPengganti:
@@ -293,36 +300,46 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
     onSuccessNavigate();
   };
 
-  const handleProceedToConfirm = (e: React.FormEvent) => {
-    e.preventDefault();
+  const validateBeforeSubmit = (): boolean => {
     setErrorMsg(null);
     setSignatureHighlightError(false);
 
     if (new Date(tanggalSelesai) < new Date(tanggalMulai)) {
       setErrorMsg('Tanggal selesai tidak boleh lebih awal dari tanggal mulai.');
-      return;
+      return false;
     }
     if (!alasan.trim()) {
       setErrorMsg('Alasan permohonan izin/cuti wajib diisi.');
-      return;
+      return false;
     }
-    if (!hasValidSignature(signatureDataUrl)) {
+    if (!isApplicantSigned) {
       setSignatureHighlightError(true);
       setErrorMsg(
-        'Permohonan tidak dapat dikirim sebelum Pemohon membubuhkan tanda tangan digital yang sah.'
+        'Permohonan tidak dapat dikirim sebelum tanda tangan digital Pemohon dibubuhkan (bisa pakai tombol 1-klik TTD Tersimpan).'
       );
       signatureSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      return;
+      return false;
     }
+    return true;
+  };
+
+  const handleOpenPreview = () => {
+    if (!validateBeforeSubmit()) return;
     setShowConfirmModal(true);
   };
 
+  const handleDirectSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validateBeforeSubmit()) return;
+    handleFinalSubmit();
+  };
+
   const handleFinalSubmit = () => {
-    if (!hasValidSignature(signatureDataUrl)) {
+    if (!isApplicantSigned) {
       setShowConfirmModal(false);
       setSignatureHighlightError(true);
       setErrorMsg(
-        'Permohonan dibatalkan: Tanda tangan digital pemohon wajib diisi sebelum mengirim permohonan.'
+        'Permohonan dibatalkan: Tanda tangan digital Pemohon wajib diisi terlebih dahulu.'
       );
       signatureSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
@@ -360,8 +377,14 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
       urlPdf: '-',
       tanggalDisetujui: '-',
       tanggalDiarsipkan: '-',
-      ttdPemohonUrl: signatureDataUrl,
+      ttdPemohonUrl: applicantSignature,
       waktuTtdPemohon: ts,
+      ttdAtasanUrl: editingRequest?.ttdAtasanUrl,
+      namaAtasan: editingRequest?.namaAtasan,
+      waktuTtdAtasan: editingRequest?.waktuTtdAtasan,
+      ttdMudirUrl: editingRequest?.ttdMudirUrl,
+      namaMudir: editingRequest?.namaMudir,
+      waktuTtdMudir: editingRequest?.waktuTtdMudir,
       idPegawaiPengganti: selectedSubstituteEmployee?.idPegawai || '-',
       namaPegawaiPengganti: selectedSubstituteEmployee?.namaLengkap || '-',
       noWaPegawaiPengganti:
@@ -480,7 +503,7 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
         </div>
       )}
 
-      <form onSubmit={handleProceedToConfirm} className="space-y-6">
+      <form onSubmit={handleDirectSubmit} className="space-y-6">
         {/* BAGIAN 1: IDENTITAS PEGAWAI OTOMATIS (READ-ONLY) */}
         <div className="bg-white border border-slate-200 rounded-lg p-5">
           <h3 className="text-sm font-bold text-slate-900 mb-3">
@@ -751,32 +774,67 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
           </div>
         </div>
 
-        {/* BAGIAN 3: TANDA TANGAN DIGITAL PEMOHON (WAJIB) */}
-        <div ref={signatureSectionRef}>
+        {/* BAGIAN 3: TANDA TANGAN DIGITAL PEMOHON (1-KLIK TTD TERSIMPAN, BERJENJANG KE ATASAN & MUDIR) */}
+        <div ref={signatureSectionRef} className="space-y-4">
           <SignaturePad
-            label="03. Tanda Tangan Digital Pemohon"
+            label="03. Tanda Tangan Digital Pemohon (Wajib Sebelum Dikirim)"
             signerName={linkedEmployee.namaLengkap}
             signerRole={`${linkedEmployee.jabatan} (${linkedEmployee.unit})`}
-            value={signatureDataUrl}
+            storageKey={linkedEmployee.idPegawai}
+            value={applicantSignature}
             required
             showError={signatureHighlightError && !isApplicantSigned}
             onChange={(val) => {
-              setSignatureDataUrl(val);
+              setApplicantSignature(val);
               if (hasValidSignature(val)) {
                 setSignatureHighlightError(false);
                 setErrorMsg(null);
               }
             }}
           />
+
+          {/* TUJUAN PENGIRIMAN WHATSAPP LANGSUNG KE ATASAN */}
+          <div className="bg-[#f0f2f5] border border-[#d1d7db] rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            <div>
+              <label className="block font-bold text-[#111b21] mb-1">
+                Atasan Langsung Tujuan (Tahap TTD Berikutnya)
+              </label>
+              <input
+                type="text"
+                readOnly
+                value={
+                  supervisorEmployee
+                    ? `${supervisorEmployee.namaLengkap} (${supervisorEmployee.jabatan})`
+                    : `Atasan Langsung (${linkedEmployee.unit})`
+                }
+                className="w-full px-3 py-2 bg-white border border-[#d1d7db] rounded-lg font-semibold text-[#111b21]"
+              />
+            </div>
+            <div>
+              <label className="block font-bold text-[#111b21] mb-1">
+                Nomor WhatsApp Atasan Langsung
+              </label>
+              <div className="relative">
+                <Smartphone className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={supervisorWaPhone}
+                  onChange={(e) => setSupervisorWaPhone(e.target.value)}
+                  placeholder="Kosongkan untuk pilih kontak langsung di WA"
+                  className="w-full pl-8 pr-3 py-2 bg-white border border-[#d1d7db] rounded-lg font-mono text-[#111b21]"
+                />
+              </div>
+            </div>
+          </div>
         </div>
 
-        {/* PENGAMAN VISUAL: INFORMASI KUNCI TOMBOL KIRIM JIKA BELUM TANDA TANGAN */}
+        {/* PENGAMAN VISUAL: INFORMASI KUNCI TOMBOL KIRIM JIKA PEMOHON BELUM TANDA TANGAN */}
         {!isApplicantSigned && (
           <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-start gap-2">
               <Lock className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
               <span>
-                <strong>Tombol Kirim Terkunci:</strong> Goreskan tanda tangan digital Anda pada kotak di atas terlebih dahulu agar permohonan tidak terluput dari tanda tangan.
+                <strong>Tombol Kirim Terkunci:</strong> Bubuhkan tanda tangan digital Pemohon (atau klik <strong>Pakai TTD Tersimpan</strong>) agar surat tidak terkirim tanpa tanda tangan. Atasan Langsung &amp; Mudir Unit akan menandatangani langsung di HP masing-masing.
               </span>
             </div>
             <button
@@ -794,29 +852,42 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
           </div>
         )}
 
-        {/* TOMBOL AKSI: SIMPAN DRAFT ATAU LANJUT KONFIRMASI */}
-        <div className="flex flex-wrap items-center justify-end gap-3 pt-2">
+        {/* TOMBOL AKSI RINGKAS: DRAFT, PRATINJAU A4 (OPSIONAL), ATAU 1-KLIK KIRIM & BUKA WA ATASAN */}
+        <div className="flex flex-wrap items-center justify-end gap-2.5 pt-2">
           <button
             type="button"
             onClick={handleSaveAsDraft}
-            className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-md transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors"
           >
             <Save className="w-4 h-4" />
-            Simpan sebagai Draft (Belum Dikirim)
+            Simpan Draft
+          </button>
+          <button
+            type="button"
+            disabled={!isApplicantSigned}
+            onClick={handleOpenPreview}
+            className={`inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold rounded-lg border transition-colors ${
+              isApplicantSigned
+                ? 'text-slate-700 bg-white border-slate-300 hover:bg-slate-50'
+                : 'text-slate-400 bg-slate-100 border-slate-200 cursor-not-allowed'
+            }`}
+          >
+            <Eye className="w-4 h-4" />
+            Pratinjau Surat A4
           </button>
           <button
             type="submit"
             disabled={!isApplicantSigned}
-            className={`inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold rounded-md transition-colors ${
+            className={`inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold rounded-lg transition-colors ${
               isApplicantSigned
-                ? 'text-white bg-emerald-900 hover:bg-emerald-800 shadow-xs'
+                ? 'text-white bg-[#25D366] hover:bg-[#1da851] shadow-xs'
                 : 'text-slate-400 bg-slate-200 border border-slate-300 cursor-not-allowed'
             }`}
           >
             {isApplicantSigned ? (
               <>
                 <Send className="w-4 h-4" />
-                Periksa & Kirim Permohonan
+                Kirim &amp; Buka WA Atasan Langsung
               </>
             ) : (
               <>
@@ -971,7 +1042,11 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
                     urlPdf: '-',
                     tanggalDisetujui: '-',
                     tanggalDiarsipkan: '-',
-                    ttdPemohonUrl: signatureDataUrl,
+                    ttdPemohonUrl: applicantSignature,
+                    ttdAtasanUrl: editingRequest?.ttdAtasanUrl,
+                    namaAtasan: editingRequest?.namaAtasan,
+                    ttdMudirUrl: editingRequest?.ttdMudirUrl,
+                    namaMudir: editingRequest?.namaMudir,
                     namaPegawaiPengganti: selectedSubstituteEmployee?.namaLengkap,
                     catatanDelegasiTugas: catatanDelegasiTugas.trim(),
                   }}
@@ -985,7 +1060,7 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
                 onClick={() => setShowConfirmModal(false)}
                 className="px-4 py-2.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg"
               >
-                Kembali & Perbaiki
+                Kembali &amp; Perbaiki
               </button>
               <button
                 type="button"
@@ -1000,12 +1075,12 @@ export const LeaveRequestFormView: React.FC<LeaveRequestFormViewProps> = ({
                 {isApplicantSigned ? (
                   <>
                     <Send className="w-3.5 h-3.5" />
-                    Konfirmasi & Kirim Sekarang
+                    Kirim &amp; Buka WA Atasan Langsung
                   </>
                 ) : (
                   <>
                     <Lock className="w-3.5 h-3.5" />
-                    Tanda Tangan Pemohon Belum Sah
+                    Tanda Tangan Pemohon Belum Diisi
                   </>
                 )}
               </button>

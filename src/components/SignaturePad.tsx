@@ -7,12 +7,47 @@ import {
   Minimize2,
   Smartphone,
   AlertTriangle,
+  Sparkles,
 } from 'lucide-react';
 
 export const hasValidSignature = (dataUrl?: string | null): boolean => {
   if (!dataUrl || typeof dataUrl !== 'string') return false;
   const trimmed = dataUrl.trim();
   return trimmed.startsWith('data:image/') && trimmed.length > 200;
+};
+
+const getSavedSignatureStorageKey = (storageKey?: string, signerName?: string): string | null => {
+  const raw = (storageKey || signerName || '').trim().toLowerCase();
+  if (!raw) return null;
+  const safe = raw.replace(/[^a-z0-9_-]/g, '_');
+  return `SIM_SDM_SAVED_SIG_V1_${safe}`;
+};
+
+export const loadSavedSignatureForUser = (storageKey?: string, signerName?: string): string => {
+  if (typeof window === 'undefined') return '';
+  const key = getSavedSignatureStorageKey(storageKey, signerName);
+  if (!key) return '';
+  try {
+    const val = localStorage.getItem(key) || '';
+    return hasValidSignature(val) ? val : '';
+  } catch {
+    return '';
+  }
+};
+
+export const saveSignatureForUser = (
+  dataUrl: string,
+  storageKey?: string,
+  signerName?: string
+): void => {
+  if (typeof window === 'undefined' || !hasValidSignature(dataUrl)) return;
+  const key = getSavedSignatureStorageKey(storageKey, signerName);
+  if (!key) return;
+  try {
+    localStorage.setItem(key, dataUrl);
+  } catch {
+    // ignore quota errors
+  }
 };
 
 interface SignaturePadProps {
@@ -24,6 +59,7 @@ interface SignaturePadProps {
   disabled?: boolean;
   required?: boolean;
   showError?: boolean;
+  storageKey?: string;
 }
 
 const MIN_INKED_PIXELS = 60;
@@ -56,12 +92,20 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
   disabled = false,
   required = true,
   showError = false,
+  storageKey,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasStrokes, setHasStrokes] = useState(hasValidSignature(value));
   const [isMobileFullscreen, setIsMobileFullscreen] = useState(false);
   const [shortStrokeHint, setShortStrokeHint] = useState(false);
+  const [savedSignature, setSavedSignature] = useState<string>(() =>
+    loadSavedSignatureForUser(storageKey, signerName)
+  );
+
+  useEffect(() => {
+    setSavedSignature(loadSavedSignatureForUser(storageKey, signerName));
+  }, [storageKey, signerName]);
 
   const initCanvasContext = (canvas: HTMLCanvasElement) => {
     const ctx = canvas.getContext('2d');
@@ -152,6 +196,8 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
         const pngUrl = canvas.toDataURL('image/png');
         setHasStrokes(true);
         setShortStrokeHint(false);
+        saveSignatureForUser(pngUrl, storageKey, signerName);
+        setSavedSignature(pngUrl);
         onChange(pngUrl);
       } else {
         // Sentuhan tak sengaja / goresan terlalu pendek -> tidak dianggap sah
@@ -177,6 +223,13 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
     setHasStrokes(false);
     setShortStrokeHint(false);
     onChange('');
+  };
+
+  const handleApplySavedSignature = () => {
+    if (!savedSignature || disabled) return;
+    setHasStrokes(true);
+    setShortStrokeHint(false);
+    onChange(savedSignature);
   };
 
   const isSignedValid = hasValidSignature(value) || hasStrokes;
@@ -212,7 +265,7 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
             Sentuh & goreskan tanda tangan langsung di sini (layar HP / mouse)
           </span>
           <span className="text-[11px] text-slate-500 mt-0.5">
-            Wajib digoreskan dengan jelas — tombol kirim otomatis terbuka setelah ditandatangani
+            Tanda tangan otomatis disimpan agar lain kali cukup 1 klik
           </span>
         </div>
       )}
@@ -256,7 +309,17 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {!disabled && savedSignature && !isSignedValid && (
+              <button
+                type="button"
+                onClick={handleApplySavedSignature}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-[#00a884] hover:bg-[#008069] rounded-md shadow-2xs transition-colors whitespace-nowrap shrink-0"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                Pakai TTD Tersimpan (1 Klik)
+              </button>
+            )}
             {!disabled && (
               <>
                 <button
@@ -292,7 +355,7 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
         )}
 
         <p className="mt-2 text-xs text-slate-500">
-          Mendukung layar sentuh HP (Android / iPhone) & Mouse · Format PNG Resmi · Terikat pada akun{' '}
+          Mendukung layar sentuh HP (Android / iPhone) & Mouse · TTD tersimpan otomatis di perangkat untuk akun{' '}
           <strong>{signerName}</strong>.
         </p>
       </div>

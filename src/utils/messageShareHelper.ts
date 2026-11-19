@@ -216,6 +216,43 @@ Wassalamu'alaikum warahmatullahi wabarakatuh.
 *${request.namaPegawai}*`;
 };
 
+export const generateApprovalResultMessageToApplicant = (
+  request: LeaveRequest,
+  decision: 'SETUJUI' | 'TOLAK' | 'MINTA REVISI'
+): string => {
+  const appUrl = typeof window !== 'undefined' ? window.location.origin : '';
+  const deepLinkUrl = buildApprovalDeepLink(request) || appUrl;
+
+  if (decision === 'SETUJUI') {
+    return `Assalamu'alaikum warahmatullahi wabarakatuh,
+
+Alhamdulillah, permohonan *${request.jenisPermohonan} (${request.kategoriKeperluan})* Anda telah *DISETUJUI & DITANDATANGANI* oleh Atasan Langsung dan Mudir Unit.
+
+📋 *RINGKASAN SURAT RESMI*
+• *No. Surat:* ${request.nomorPermohonan}
+• *Nama:* ${request.namaPegawai}
+• *Tanggal:* ${request.tanggalMulai} s/d ${request.tanggalSelesai} (${request.jumlahHari})
+• *Status:* ✅ DISETUJUI LENGKAP (3 Tanda Tangan)
+
+📄 *Buka & Unduh PDF Resmi (A4):*
+👉 ${deepLinkUrl}
+
+Semoga Allah memudahkan urusan Anda.
+Wassalamu'alaikum warahmatullahi wabarakatuh.`;
+  }
+
+  return `Assalamu'alaikum warahmatullahi wabarakatuh,
+
+Pemberitahuan terkait permohonan *${request.jenisPermohonan}* Anda (*${request.nomorPermohonan}*):
+• *Status:* ${request.statusPermohonan}
+• *Catatan Pimpinan:* ${request.catatanMudir !== '-' ? request.catatanMudir : request.catatanAtasan || '-'}
+
+👉 *Lihat Detail di Aplikasi:*
+${deepLinkUrl}
+
+Wassalamu'alaikum warahmatullahi wabarakatuh.`;
+};
+
 export const formatWhatsAppUrl = (phone: string | undefined, messageText: string): string => {
   const encoded = encodeURIComponent(messageText);
   if (!phone || phone === '-' || phone.trim() === '') {

@@ -23,6 +23,7 @@ import { OfficialLetterPaper } from './OfficialFormModal';
 import { formatOfficialPdfFilename, generateOfficialLeavePDF } from '../utils/pdfGenerator';
 import {
   formatWhatsAppUrl,
+  generateApprovalResultMessageToApplicant,
   generateFollowUpMessageText,
 } from '../utils/messageShareHelper';
 import {
@@ -511,12 +512,32 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
     setSelectedRequest(null);
 
     if (updatedReqObj) {
-      // 1. Jika DISETUJUI Mudir: Otomatis generate PDF A4 & upload ke Folder Google Drive "Arsip izin ISO" via GAS
+      // 1. Jika DISETUJUI Mudir: Otomatis buka WA ke Pegawai (Pemohon) + generate PDF A4 & upload ke Folder Google Drive "Arsip izin ISO" via GAS
       if (decisionType === 'SETUJUI') {
+        const applicantEmp = updatedStore.MASTER_PEGAWAI.find(
+          (e) => e.idPegawai === updatedReqObj.idPegawai
+        );
+
+        // Langsung buka WhatsApp ke Pegawai dengan pesan persetujuan + tautan unduh PDF
+        const waMsgToApplicant = generateApprovalResultMessageToApplicant(
+          updatedReqObj,
+          'SETUJUI'
+        );
+        const waUrlToApplicant = formatWhatsAppUrl(
+          applicantEmp?.nomorTelepon && applicantEmp.nomorTelepon !== '-'
+            ? applicantEmp.nomorTelepon
+            : '',
+          waMsgToApplicant
+        );
+        const a = document.createElement('a');
+        a.href = waUrlToApplicant;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
         try {
-          const applicantEmp = updatedStore.MASTER_PEGAWAI.find(
-            (e) => e.idPegawai === updatedReqObj.idPegawai
-          );
           const pdfBase64 = generateOfficialLeavePDF(updatedReqObj, applicantEmp, 'base64');
           uploadPdfToGasDriveFolder(updatedStore, updatedReqObj, pdfBase64, pdfFilename).then(
             (driveRes) => {
@@ -528,7 +549,7 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
         }
       }
 
-      // 2. Kirim notifikasi WhatsApp otomatis ke Pemohon, Atasan & Pegawai Pengganti
+      // 2. Kirim notifikasi WhatsApp otomatis via API server ke Pemohon, Atasan & Pegawai Pengganti
       triggerWhatsAppAutomation(
         updatedStore,
         updatedReqObj,
@@ -541,7 +562,7 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
           type: 'success',
           text:
             decisionType === 'SETUJUI'
-              ? `Permohonan ${updatedReqObj.nomorPermohonan} berhasil DISETUJUI, PDF resmi (${pdfFilename}) dibuat & diarsipkan ke folder "${ARSIP_IZIN_ISO_FOLDER_NAME}". ${waRes.summaryText}`
+              ? `Permohonan ${updatedReqObj.nomorPermohonan} berhasil DISETUJUI, PDF resmi (${pdfFilename}) diarsipkan ke "${ARSIP_IZIN_ISO_FOLDER_NAME}", dan otomatis diarahkan ke WA Pegawai. ${waRes.summaryText}`
               : `Keputusan Mudir Unit (${decisionType}) berhasil disimpan. ${waRes.summaryText}`,
         });
       });
@@ -843,7 +864,7 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
           {decisionType === 'SETUJUI' && (
             <>
               <SignaturePad
-                label={`3. Goreskan Tanda Tangan Digital (${
+                label={`3. Tanda Tangan Digital (${
                   selectedRequest.statusPermohonan === 'MENUNGGU PERSETUJUAN ATASAN'
                     ? 'Atasan Langsung'
                     : 'Mudir Unit'
@@ -854,6 +875,7 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
                     ? 'ATASAN LANGSUNG'
                     : 'MUDIR UNIT'
                 }
+                storageKey={currentUser.idPegawai}
                 value={approverSignature}
                 required
                 showError={Boolean(panelError) && !isApproverSigned}
@@ -929,8 +951,10 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
                     <Lock className="w-3.5 h-3.5" />
                     Tanda Tangan Dulu untuk Menyetujui & Terbitkan PDF
                   </>
+                ) : decisionType === 'SETUJUI' ? (
+                  'Simpan TTD Mudir, Terbitkan PDF & Kabari WA Pegawai'
                 ) : (
-                  'Simpan Keputusan Mudir Unit & Terbitkan PDF Resmi'
+                  'Simpan Keputusan Mudir Unit'
                 )}
               </button>
             )}

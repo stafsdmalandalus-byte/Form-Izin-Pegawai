@@ -90,6 +90,51 @@ function formatWibClock(date: Date): string {
   }
 }
 
+const SESSION_STORAGE_KEY = 'SIM_SDM_ALANDALUS_SESSION_V1';
+
+function loadSavedSession(users: UserAccount[]): { user: UserAccount; isAdminSdm: boolean } | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { userId?: string; idPegawai?: string; isAdminSdm?: boolean };
+    if (!parsed || (!parsed.userId && !parsed.idPegawai)) return null;
+    const found = users.find(
+      (u) =>
+        u.statusAkun === 'Aktif' &&
+        ((parsed.userId && u.userId === parsed.userId) ||
+          (parsed.idPegawai && u.idPegawai === parsed.idPegawai))
+    );
+    if (!found) return null;
+    return {
+      user: found,
+      isAdminSdm: Boolean(parsed.isAdminSdm) || found.role === 'ADMIN SDM',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveUserSession(user: UserAccount | null, isAdminSdm: boolean) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (!user) {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    } else {
+      localStorage.setItem(
+        SESSION_STORAGE_KEY,
+        JSON.stringify({
+          userId: user.userId,
+          idPegawai: user.idPegawai,
+          isAdminSdm,
+        })
+      );
+    }
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
 export function App() {
   const [store, setStore] = useState<FullDatabaseStore>(() => {
     const initial = loadDatabase();
@@ -103,13 +148,6 @@ export function App() {
     }
     return initial;
   });
-  const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
-  const [isAdminSdmSession, setIsAdminSdmSession] = useState(false);
-
-  const [activeMenu, setActiveMenu] = useState<ActiveMenu>('dashboard');
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [previewPdfRequest, setPreviewPdfRequest] = useState<LeaveRequest | null>(null);
-  const [editingRequest, setEditingRequest] = useState<LeaveRequest | null>(null);
 
   // Tautan Cepat Persetujuan 1-Klik dari WhatsApp (?req=REQ-...&d=...)
   const [deepLinkReqId, setDeepLinkReqId] = useState<string | null>(() => {
@@ -120,6 +158,21 @@ export function App() {
     const decoded = decodeLeaveRequestFromUrl(params.get('d'));
     return decoded?.idPermohonan || null;
   });
+
+  const initialSession = useMemo(() => loadSavedSession(store.USERS), []);
+  const [currentUser, setCurrentUser] = useState<UserAccount | null>(
+    () => initialSession?.user || null
+  );
+  const [isAdminSdmSession, setIsAdminSdmSession] = useState<boolean>(
+    () => initialSession?.isAdminSdm || false
+  );
+
+  const [activeMenu, setActiveMenu] = useState<ActiveMenu>(() =>
+    deepLinkReqId && initialSession?.user ? 'persetujuan' : 'dashboard'
+  );
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [previewPdfRequest, setPreviewPdfRequest] = useState<LeaveRequest | null>(null);
+  const [editingRequest, setEditingRequest] = useState<LeaveRequest | null>(null);
 
   // State Modal Ubah Password Mandiri oleh Pegawai
   const [showChangePassModal, setShowChangePassModal] = useState(false);
@@ -452,8 +505,10 @@ export function App() {
 
       saveDatabase(updatedStore);
       setStore(updatedStore);
+      const isAdmin = activeUserAccount.role === 'ADMIN SDM';
       setCurrentUser(activeUserAccount);
-      setIsAdminSdmSession(activeUserAccount.role === 'ADMIN SDM');
+      setIsAdminSdmSession(isAdmin);
+      saveUserSession(activeUserAccount, isAdmin);
       setLoginPassword('');
       setShowNameDropdown(false);
       // Jika login dari tautan cepat WhatsApp (?req=...), langsung buka menu Persetujuan & fokus suratnya
@@ -584,7 +639,9 @@ export function App() {
     );
 
     setStore(updatedStore);
-    setCurrentUser({ ...target, terakhirLogin: ts });
+    const switchedUser = { ...target, terakhirLogin: ts };
+    setCurrentUser(switchedUser);
+    saveUserSession(switchedUser, true);
     setActiveMenu('dashboard');
   };
 
@@ -1248,6 +1305,7 @@ export function App() {
             <button
               type="button"
               onClick={() => {
+                saveUserSession(null, false);
                 setIsAdminSdmSession(false);
                 setCurrentUser(null);
               }}
