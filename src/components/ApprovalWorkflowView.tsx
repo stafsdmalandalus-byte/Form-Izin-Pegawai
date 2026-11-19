@@ -22,6 +22,10 @@ import { SignaturePad, hasValidSignature } from './SignaturePad';
 import { OfficialLetterPaper } from './OfficialFormModal';
 import { formatOfficialPdfFilename, generateOfficialLeavePDF } from '../utils/pdfGenerator';
 import {
+  formatWhatsAppUrl,
+  generateFollowUpMessageText,
+} from '../utils/messageShareHelper';
+import {
   fetchWhatsAppServerStatus,
   triggerWhatsAppAutomation,
   WhatsAppServerStatus,
@@ -294,6 +298,51 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
     setSelectedRequest(null);
 
     if (updatedReqObj) {
+      // Jika Atasan Langsung MENYETUJUI: otomatis buka WhatsApp ke Mudir Unit & tampilkan modal kirim WA ke Mudir
+      if (decisionType === 'SETUJUI') {
+        const applicantEmp = updatedStore.MASTER_PEGAWAI.find(
+          (e) => e.idPegawai === updatedReqObj.idPegawai
+        );
+        const mudirEmp =
+          updatedStore.MASTER_PEGAWAI.find(
+            (e) =>
+              applicantEmp?.idMudirUnit &&
+              applicantEmp.idMudirUnit !== '-' &&
+              e.idPegawai === applicantEmp.idMudirUnit
+          ) ||
+          updatedStore.MASTER_PEGAWAI.find(
+            (e) =>
+              e.unit === updatedReqObj.unit &&
+              e.jabatan.toLowerCase().includes('mudir')
+          ) ||
+          updatedStore.MASTER_PEGAWAI.find((e) =>
+            e.jabatan.toLowerCase().includes('mudir')
+          );
+
+        const waMsgToMudir = generateFollowUpMessageText(
+          updatedReqObj,
+          'MUDIR UNIT',
+          mudirEmp
+        );
+        const waUrlToMudir = formatWhatsAppUrl(
+          mudirEmp?.nomorTelepon && mudirEmp.nomorTelepon !== '-'
+            ? mudirEmp.nomorTelepon
+            : '',
+          waMsgToMudir
+        );
+
+        const a = document.createElement('a');
+        a.href = waUrlToMudir;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        // Buka juga jendela Kirim WA (tujuan Mudir) sebagai cadangan bila perlu memilih nomor / melampirkan PDF
+        setShareMessageRequest(updatedReqObj);
+      }
+
       triggerWhatsAppAutomation(
         updatedStore,
         updatedReqObj,
@@ -304,7 +353,10 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
         refreshWaStatus();
         setFeedback({
           type: 'success',
-          text: `Keputusan Atasan Langsung (${decisionType}) untuk nomor ${updatedReqObj.nomorPermohonan} berhasil disimpan. ${waRes.summaryText}`,
+          text:
+            decisionType === 'SETUJUI'
+              ? `Keputusan & tanda tangan Atasan Langsung untuk ${updatedReqObj.nomorPermohonan} berhasil disimpan dan otomatis diteruskan ke WhatsApp Mudir Unit. ${waRes.summaryText}`
+              : `Keputusan Atasan Langsung (${decisionType}) untuk nomor ${updatedReqObj.nomorPermohonan} berhasil disimpan. ${waRes.summaryText}`,
         });
       });
     } else {
@@ -855,8 +907,10 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
                     <Lock className="w-3.5 h-3.5" />
                     Tanda Tangan Dulu untuk Menyetujui
                   </>
+                ) : decisionType === 'SETUJUI' ? (
+                  'Simpan TTD Atasan & Teruskan ke WA Mudir'
                 ) : (
-                  'Simpan Keputusan & Tanda Tangan Atasan Langsung'
+                  'Simpan Keputusan Atasan Langsung'
                 )}
               </button>
             ) : (
@@ -1305,6 +1359,11 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
         <ShareMessageModal
           request={shareMessageRequest}
           employees={store.MASTER_PEGAWAI}
+          initialTarget={
+            shareMessageRequest.statusPermohonan === 'MENUNGGU PERSETUJUAN MUDIR'
+              ? 'MUDIR UNIT'
+              : undefined
+          }
           onClose={() => setShareMessageRequest(null)}
         />
       )}
