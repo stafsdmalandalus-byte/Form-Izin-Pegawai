@@ -10,6 +10,7 @@ import {
   generateOfficialLeaveWord,
 } from '../utils/pdfGenerator';
 import { OfficialLetterPaper } from './OfficialFormModal';
+import { hasValidSignature } from './SignaturePad';
 import {
   MessageSquareShare,
   Copy,
@@ -20,6 +21,9 @@ import {
   Download,
   FileText,
   Share2,
+  Lock,
+  CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface ShareMessageModalProps {
@@ -76,7 +80,20 @@ export const ShareMessageModal: React.FC<ShareMessageModalProps> = ({
     setTimeout(() => setCopied(false), 2500);
   };
 
+  const hasPemohonSig = hasValidSignature(request.ttdPemohonUrl);
+  const hasAtasanSig = hasValidSignature(request.ttdAtasanUrl);
+  const hasMudirSig = hasValidSignature(request.ttdMudirUrl);
+
+  const missingRequiredSignatureReason = !hasPemohonSig
+    ? 'Surat ini belum ditandatangani oleh Pemohon. Lengkapi tanda tangan Pemohon terlebih dahulu sebelum dikirim ke WhatsApp.'
+    : targetRole === 'MUDIR UNIT' && !hasAtasanSig
+    ? 'Atasan Langsung belum membubuhkan tanda tangan pada surat ini. Kirim ke Atasan Langsung terlebih dahulu sebelum diteruskan ke Mudir Unit.'
+    : null;
+
+  const isSendLocked = Boolean(missingRequiredSignatureReason);
+
   const handleOpenWhatsApp = () => {
+    if (isSendLocked) return;
     const url = formatWhatsAppUrl(customPhone, messageText);
     const a = document.createElement('a');
     a.href = url;
@@ -170,6 +187,45 @@ export const ShareMessageModal: React.FC<ShareMessageModalProps> = ({
                 2. Ke Mudir / Kepala Divisi
               </button>
             </div>
+          </div>
+
+          {/* Checklist Status 3 Tanda Tangan */}
+          <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-bold text-slate-800">Status Kelengkapan Tanda Tangan:</span>
+              <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-bold">
+                <span
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded ${
+                    hasPemohonSig ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
+                  }`}
+                >
+                  {hasPemohonSig ? <CheckCircle2 className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+                  Pemohon {hasPemohonSig ? 'Sudah TTD' : 'Belum TTD'}
+                </span>
+                <span
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded ${
+                    hasAtasanSig ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                  }`}
+                >
+                  {hasAtasanSig ? <CheckCircle2 className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+                  Atasan {hasAtasanSig ? 'Sudah TTD' : 'Belum TTD'}
+                </span>
+                <span
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded ${
+                    hasMudirSig ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {hasMudirSig ? <CheckCircle2 className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+                  Mudir {hasMudirSig ? 'Sudah TTD' : 'Belum TTD'}
+                </span>
+              </div>
+            </div>
+            {missingRequiredSignatureReason && (
+              <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-900 font-medium flex items-start gap-2">
+                <Lock className="w-4 h-4 text-red-700 shrink-0 mt-0.5" />
+                <span>{missingRequiredSignatureReason}</span>
+              </div>
+            )}
           </div>
 
           {/* 2. Pratinjau Langsung Surat Resmi AIS-FRM-SEK.02.11 yang Sudah Ditandatangani */}
@@ -272,20 +328,32 @@ export const ShareMessageModal: React.FC<ShareMessageModalProps> = ({
 
           <button
             type="button"
+            disabled={isSendLocked}
             onClick={handleShareSignedPdfToWa}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-[#008069] bg-[#d9fdd3] border border-[#b7f0ad] hover:bg-[#b7f0ad] rounded-lg transition-colors"
+            className={`inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg transition-colors ${
+              isSendLocked
+                ? 'text-slate-400 bg-slate-200 border border-slate-300 cursor-not-allowed'
+                : 'text-[#008069] bg-[#d9fdd3] border border-[#b7f0ad] hover:bg-[#b7f0ad]'
+            }`}
           >
-            <Share2 className="w-4 h-4" />
+            {isSendLocked ? <Lock className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
             Lampirkan PDF Surat + Buka WA
           </button>
 
           <button
             type="button"
+            disabled={isSendLocked}
             onClick={handleOpenWhatsApp}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-[#25D366] hover:bg-[#1da851] rounded-lg transition-colors shadow-2xs"
+            className={`inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg transition-colors ${
+              isSendLocked
+                ? 'text-slate-400 bg-slate-200 border border-slate-300 cursor-not-allowed'
+                : 'text-white bg-[#25D366] hover:bg-[#1da851] shadow-2xs'
+            }`}
           >
-            <ExternalLink className="w-4 h-4" />
-            Kirim Pesan WA ke {targetRole === 'ATASAN LANGSUNG' ? 'Atasan Langsung' : 'Mudir'}
+            {isSendLocked ? <Lock className="w-4 h-4" /> : <ExternalLink className="w-4 h-4" />}
+            {isSendLocked
+              ? 'Terkunci (Belum Lengkap TTD)'
+              : `Kirim Pesan WA ke ${targetRole === 'ATASAN LANGSUNG' ? 'Atasan Langsung' : 'Mudir'}`}
           </button>
         </div>
       </div>

@@ -18,7 +18,7 @@ import {
   uploadPdfToGasDriveFolder,
   validatePermission,
 } from '../services/databaseService';
-import { SignaturePad } from './SignaturePad';
+import { SignaturePad, hasValidSignature } from './SignaturePad';
 import { OfficialLetterPaper } from './OfficialFormModal';
 import { formatOfficialPdfFilename, generateOfficialLeavePDF } from '../utils/pdfGenerator';
 import {
@@ -37,6 +37,8 @@ import {
   MessageSquareShare,
   Smartphone,
   UserCheck,
+  Lock,
+  AlertTriangle,
 } from 'lucide-react';
 import { ShareMessageModal } from './ShareMessageModal';
 
@@ -67,10 +69,14 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
   const [decisionType, setDecisionType] = useState<'SETUJUI' | 'TOLAK' | 'MINTA REVISI'>('SETUJUI');
   const [catatan, setCatatan] = useState('');
   const [approverSignature, setApproverSignature] = useState('');
+  const [panelError, setPanelError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null
   );
   const [waServerStatus, setWaServerStatus] = useState<WhatsAppServerStatus | null>(null);
+
+  const isApproverSigned = hasValidSignature(approverSignature);
+  const isApprovalSubmitLocked = decisionType === 'SETUJUI' && !isApproverSigned;
 
   const refreshWaStatus = () => {
     fetchWhatsAppServerStatus().then((st) => {
@@ -135,6 +141,7 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
     setDecisionType(defaultDecision);
     setCatatan('');
     setApproverSignature('');
+    setPanelError(null);
     setFeedback(null);
   };
 
@@ -173,19 +180,20 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
       return;
     }
 
-    if (decisionType === 'SETUJUI' && !approverSignature) {
-      setFeedback({
-        type: 'error',
-        text: 'Atasan Langsung wajib membubuhkan tanda tangan digital untuk menyetujui permohonan.',
-      });
+    setPanelError(null);
+
+    if (decisionType === 'SETUJUI' && !hasValidSignature(approverSignature)) {
+      const msg =
+        'Atasan Langsung wajib membubuhkan tanda tangan digital yang sah sebelum menyetujui permohonan.';
+      setPanelError(msg);
+      setFeedback({ type: 'error', text: msg });
       return;
     }
 
     if ((decisionType === 'TOLAK' || decisionType === 'MINTA REVISI') && !catatan.trim()) {
-      setFeedback({
-        type: 'error',
-        text: `Atasan Langsung wajib mengisi catatan alasan untuk keputusan ${decisionType}.`,
-      });
+      const msg = `Atasan Langsung wajib mengisi catatan alasan untuk keputusan ${decisionType}.`;
+      setPanelError(msg);
+      setFeedback({ type: 'error', text: msg });
       return;
     }
 
@@ -321,19 +329,20 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
       return;
     }
 
-    if (decisionType === 'SETUJUI' && !approverSignature) {
-      setFeedback({
-        type: 'error',
-        text: 'Mudir Unit wajib membubuhkan tanda tangan digital untuk menyetujui permohonan.',
-      });
+    setPanelError(null);
+
+    if (decisionType === 'SETUJUI' && !hasValidSignature(approverSignature)) {
+      const msg =
+        'Mudir Unit wajib membubuhkan tanda tangan digital yang sah sebelum menyetujui permohonan dan menerbitkan PDF resmi.';
+      setPanelError(msg);
+      setFeedback({ type: 'error', text: msg });
       return;
     }
 
     if ((decisionType === 'TOLAK' || decisionType === 'MINTA REVISI') && !catatan.trim()) {
-      setFeedback({
-        type: 'error',
-        text: `Mudir Unit wajib mengisi catatan alasan untuk keputusan ${decisionType}.`,
-      });
+      const msg = `Mudir Unit wajib mengisi catatan alasan untuk keputusan ${decisionType}.`;
+      setPanelError(msg);
+      setFeedback({ type: 'error', text: msg });
       return;
     }
 
@@ -780,21 +789,46 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
           </div>
 
           {decisionType === 'SETUJUI' && (
-            <SignaturePad
-              label={`3. Goreskan Tanda Tangan Digital (${
-                selectedRequest.statusPermohonan === 'MENUNGGU PERSETUJUAN ATASAN'
-                  ? 'Atasan Langsung'
-                  : 'Mudir Unit'
-              }: ${currentUser.namaPengguna})`}
-              signerName={currentUser.namaPengguna}
-              signerRole={
-                selectedRequest.statusPermohonan === 'MENUNGGU PERSETUJUAN ATASAN'
-                  ? 'ATASAN LANGSUNG'
-                  : 'MUDIR UNIT'
-              }
-              value={approverSignature}
-              onChange={setApproverSignature}
-            />
+            <>
+              <SignaturePad
+                label={`3. Goreskan Tanda Tangan Digital (${
+                  selectedRequest.statusPermohonan === 'MENUNGGU PERSETUJUAN ATASAN'
+                    ? 'Atasan Langsung'
+                    : 'Mudir Unit'
+                }: ${currentUser.namaPengguna})`}
+                signerName={currentUser.namaPengguna}
+                signerRole={
+                  selectedRequest.statusPermohonan === 'MENUNGGU PERSETUJUAN ATASAN'
+                    ? 'ATASAN LANGSUNG'
+                    : 'MUDIR UNIT'
+                }
+                value={approverSignature}
+                required
+                showError={Boolean(panelError) && !isApproverSigned}
+                onChange={(val) => {
+                  setApproverSignature(val);
+                  if (hasValidSignature(val)) {
+                    setPanelError(null);
+                  }
+                }}
+              />
+
+              {!isApproverSigned && (
+                <div className="p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-xs flex items-center gap-2">
+                  <Lock className="w-4 h-4 text-amber-700 shrink-0" />
+                  <span>
+                    <strong>Tombol Persetujuan Terkunci:</strong> Goreskan tanda tangan digital Anda terlebih dahulu pada kotak di atas agar surat tidak terluput dari tanda tangan pejabat.
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+
+          {panelError && (
+            <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-900 text-xs font-semibold flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-700 shrink-0" />
+              <span>{panelError}</span>
+            </div>
           )}
 
           <div className="flex flex-wrap justify-end gap-2 pt-2">
@@ -808,18 +842,42 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
             {selectedRequest.statusPermohonan === 'MENUNGGU PERSETUJUAN ATASAN' ? (
               <button
                 type="button"
+                disabled={isApprovalSubmitLocked}
                 onClick={handleExecuteSupervisorDecision}
-                className="px-5 py-2.5 text-xs font-bold text-white bg-[#00a884] hover:bg-[#008069] rounded-lg shadow-xs"
+                className={`inline-flex items-center gap-1.5 px-5 py-2.5 text-xs font-bold rounded-lg transition-colors ${
+                  isApprovalSubmitLocked
+                    ? 'text-slate-400 bg-slate-200 border border-slate-300 cursor-not-allowed'
+                    : 'text-white bg-[#00a884] hover:bg-[#008069] shadow-xs'
+                }`}
               >
-                Simpan Keputusan & Tanda Tangan Atasan Langsung
+                {isApprovalSubmitLocked ? (
+                  <>
+                    <Lock className="w-3.5 h-3.5" />
+                    Tanda Tangan Dulu untuk Menyetujui
+                  </>
+                ) : (
+                  'Simpan Keputusan & Tanda Tangan Atasan Langsung'
+                )}
               </button>
             ) : (
               <button
                 type="button"
+                disabled={isApprovalSubmitLocked}
                 onClick={handleExecuteMudirDecision}
-                className="px-5 py-2.5 text-xs font-bold text-white bg-[#00a884] hover:bg-[#008069] rounded-lg shadow-xs"
+                className={`inline-flex items-center gap-1.5 px-5 py-2.5 text-xs font-bold rounded-lg transition-colors ${
+                  isApprovalSubmitLocked
+                    ? 'text-slate-400 bg-slate-200 border border-slate-300 cursor-not-allowed'
+                    : 'text-white bg-[#00a884] hover:bg-[#008069] shadow-xs'
+                }`}
               >
-                Simpan Keputusan Mudir Unit & Terbitkan PDF Resmi
+                {isApprovalSubmitLocked ? (
+                  <>
+                    <Lock className="w-3.5 h-3.5" />
+                    Tanda Tangan Dulu untuk Menyetujui & Terbitkan PDF
+                  </>
+                ) : (
+                  'Simpan Keputusan Mudir Unit & Terbitkan PDF Resmi'
+                )}
               </button>
             )}
           </div>
@@ -890,6 +948,35 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
                     <div>
                       Atasan: <strong>{req.statusAtasan}</strong> · Mudir:{' '}
                       <strong>{req.statusMudir}</strong>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-[#d1d7db] text-[10px] font-bold">
+                      <span
+                        className={`px-1.5 py-0.5 rounded ${
+                          hasValidSignature(req.ttdPemohonUrl)
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-red-100 text-red-700'
+                        }`}
+                      >
+                        TTD Pemohon {hasValidSignature(req.ttdPemohonUrl) ? '✓' : '✗'}
+                      </span>
+                      <span
+                        className={`px-1.5 py-0.5 rounded ${
+                          hasValidSignature(req.ttdAtasanUrl)
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-slate-200 text-slate-600'
+                        }`}
+                      >
+                        TTD Atasan {hasValidSignature(req.ttdAtasanUrl) ? '✓' : '—'}
+                      </span>
+                      <span
+                        className={`px-1.5 py-0.5 rounded ${
+                          hasValidSignature(req.ttdMudirUrl)
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-slate-200 text-slate-600'
+                        }`}
+                      >
+                        TTD Mudir {hasValidSignature(req.ttdMudirUrl) ? '✓' : '—'}
+                      </span>
                     </div>
                     {req.namaPegawaiPengganti && req.namaPegawaiPengganti !== '-' && (
                       <div className="text-[#008069] font-semibold flex items-center gap-1 pt-1 border-t border-[#d1d7db]">
@@ -1061,6 +1148,35 @@ export const ApprovalWorkflowView: React.FC<ApprovalWorkflowViewProps> = ({
                       <div className="font-bold text-[#111b21]">{req.statusPermohonan}</div>
                       <div className="text-[11px] text-[#667781] mt-0.5">
                         Atasan: {req.statusAtasan} · Mudir: {req.statusMudir}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1 mt-1 text-[10px] font-bold">
+                        <span
+                          className={`px-1.5 py-0.5 rounded ${
+                            hasValidSignature(req.ttdPemohonUrl)
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-red-100 text-red-700'
+                          }`}
+                        >
+                          Pemohon {hasValidSignature(req.ttdPemohonUrl) ? '✓' : '✗'}
+                        </span>
+                        <span
+                          className={`px-1.5 py-0.5 rounded ${
+                            hasValidSignature(req.ttdAtasanUrl)
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-slate-200 text-slate-600'
+                          }`}
+                        >
+                          Atasan {hasValidSignature(req.ttdAtasanUrl) ? '✓' : '—'}
+                        </span>
+                        <span
+                          className={`px-1.5 py-0.5 rounded ${
+                            hasValidSignature(req.ttdMudirUrl)
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-slate-200 text-slate-600'
+                          }`}
+                        >
+                          Mudir {hasValidSignature(req.ttdMudirUrl) ? '✓' : '—'}
+                        </span>
                       </div>
                       {(req.catatanAtasan !== '-' || req.catatanMudir !== '-') && (
                         <div className="text-[11px] text-amber-800 mt-1">

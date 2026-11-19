@@ -1,5 +1,19 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Eraser, CheckCircle2, PenTool, Maximize2, Minimize2, Smartphone } from 'lucide-react';
+import {
+  Eraser,
+  CheckCircle2,
+  PenTool,
+  Maximize2,
+  Minimize2,
+  Smartphone,
+  AlertTriangle,
+} from 'lucide-react';
+
+export const hasValidSignature = (dataUrl?: string | null): boolean => {
+  if (!dataUrl || typeof dataUrl !== 'string') return false;
+  const trimmed = dataUrl.trim();
+  return trimmed.startsWith('data:image/') && trimmed.length > 200;
+};
 
 interface SignaturePadProps {
   label: string;
@@ -8,7 +22,30 @@ interface SignaturePadProps {
   value?: string;
   onChange: (dataUrl: string) => void;
   disabled?: boolean;
+  required?: boolean;
+  showError?: boolean;
 }
+
+const MIN_INKED_PIXELS = 60;
+
+const countInkedPixels = (canvas: HTMLCanvasElement): number => {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return 0;
+  try {
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    let count = 0;
+    // Periksa kanal alpha (setiap 4 byte) untuk menghitung piksel tinta nyata
+    for (let i = 3; i < imgData.length; i += 4) {
+      if (imgData[i] > 20) {
+        count++;
+        if (count >= MIN_INKED_PIXELS) return count;
+      }
+    }
+    return count;
+  } catch {
+    return MIN_INKED_PIXELS;
+  }
+};
 
 export const SignaturePad: React.FC<SignaturePadProps> = ({
   label,
@@ -17,11 +54,14 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
   value,
   onChange,
   disabled = false,
+  required = true,
+  showError = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [hasStrokes, setHasStrokes] = useState(Boolean(value));
+  const [hasStrokes, setHasStrokes] = useState(hasValidSignature(value));
   const [isMobileFullscreen, setIsMobileFullscreen] = useState(false);
+  const [shortStrokeHint, setShortStrokeHint] = useState(false);
 
   const initCanvasContext = (canvas: HTMLCanvasElement) => {
     const ctx = canvas.getContext('2d');
@@ -39,15 +79,16 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
     const ctx = initCanvasContext(canvas);
     if (!ctx) return;
 
-    if (value && value.startsWith('data:image/')) {
+    if (hasValidSignature(value)) {
       const img = new Image();
       img.onload = () => {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         setHasStrokes(true);
+        setShortStrokeHint(false);
       };
-      img.src = value;
-    } else if (!value) {
+      img.src = value!;
+    } else {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       setHasStrokes(false);
     }
@@ -80,6 +121,7 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
     if (!ctx) return;
     ctx.beginPath();
     ctx.moveTo(coords.x, coords.y);
+    setShortStrokeHint(false);
     setIsDrawing(true);
   };
 
@@ -92,7 +134,6 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
     if (!ctx) return;
     ctx.lineTo(coords.x, coords.y);
     ctx.stroke();
-    setHasStrokes(true);
   };
 
   const handlePointerUpOrCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -106,9 +147,24 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
     setIsDrawing(false);
     const canvas = canvasRef.current;
     if (canvas) {
-      const pngUrl = canvas.toDataURL('image/png');
-      onChange(pngUrl);
-      setHasStrokes(true);
+      const inked = countInkedPixels(canvas);
+      if (inked >= MIN_INKED_PIXELS) {
+        const pngUrl = canvas.toDataURL('image/png');
+        setHasStrokes(true);
+        setShortStrokeHint(false);
+        onChange(pngUrl);
+      } else {
+        // Sentuhan tak sengaja / goresan terlalu pendek -> tidak dianggap sah
+        const ctx = canvas.getContext('2d');
+        if (ctx && !hasValidSignature(value)) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+        setHasStrokes(hasValidSignature(value));
+        setShortStrokeHint(true);
+        if (!hasValidSignature(value)) {
+          onChange('');
+        }
+      }
     }
   };
 
@@ -119,11 +175,22 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     setHasStrokes(false);
+    setShortStrokeHint(false);
     onChange('');
   };
 
+  const isSignedValid = hasValidSignature(value) || hasStrokes;
+
   const renderCanvasArea = (heightClass: string) => (
-    <div className="relative border-2 border-dashed border-emerald-800/40 rounded-lg bg-slate-50 overflow-hidden select-none">
+    <div
+      className={`relative border-2 border-dashed rounded-lg overflow-hidden select-none transition-colors ${
+        isSignedValid
+          ? 'border-emerald-600 bg-slate-50'
+          : showError
+          ? 'border-red-500 bg-red-50/40'
+          : 'border-amber-500/80 bg-amber-50/20'
+      }`}
+    >
       {/* Garis bantu tanda tangan */}
       <div className="pointer-events-none absolute inset-x-8 bottom-9 border-b border-slate-300/80" />
       <canvas
@@ -138,14 +205,14 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
           disabled ? 'cursor-not-allowed opacity-75' : 'cursor-crosshair'
         }`}
       />
-      {!hasStrokes && !disabled && (
+      {!isSignedValid && !disabled && (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-slate-400 px-4 text-center">
-          <PenTool className="w-6 h-6 mb-1.5 text-emerald-800/60" />
-          <span className="text-xs font-medium text-slate-600">
-            Sentuh & goreskan jari langsung di layar HP Anda (atau gunakan mouse)
+          <PenTool className="w-6 h-6 mb-1.5 text-emerald-800/70" />
+          <span className="text-xs font-semibold text-slate-700">
+            Sentuh & goreskan tanda tangan langsung di sini (layar HP / mouse)
           </span>
-          <span className="text-[11px] text-slate-400 mt-0.5">
-            Tanda tangan otomatis disimpan sebagai gambar PNG transparan
+          <span className="text-[11px] text-slate-500 mt-0.5">
+            Wajib digoreskan dengan jelas — tombol kirim otomatis terbuka setelah ditandatangani
           </span>
         </div>
       )}
@@ -154,12 +221,34 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
 
   return (
     <>
-      <div className="border border-slate-200 rounded-lg bg-white p-4">
+      <div
+        className={`border-2 rounded-xl bg-white p-4 transition-colors ${
+          isSignedValid
+            ? 'border-emerald-500/70'
+            : showError
+            ? 'border-red-500 ring-2 ring-red-200'
+            : required
+            ? 'border-amber-400'
+            : 'border-slate-200'
+        }`}
+      >
         <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
           <div>
-            <div className="flex items-center gap-1.5">
-              <Smartphone className="w-4 h-4 text-emerald-900" />
-              <p className="text-sm font-semibold text-slate-900">{label}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Smartphone className="w-4 h-4 text-emerald-900 shrink-0" />
+              <p className="text-sm font-bold text-slate-900">{label}</p>
+              {required && !isSignedValid && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold bg-red-100 text-red-800 rounded">
+                  <AlertTriangle className="w-3 h-3" />
+                  WAJIB DIISI
+                </span>
+              )}
+              {isSignedValid && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold bg-emerald-100 text-emerald-800 rounded">
+                  <CheckCircle2 className="w-3 h-3" />
+                  Tanda Tangan Sah
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
               Penandatangan: <span className="font-medium text-slate-800">{signerName}</span> ·{' '}
@@ -168,12 +257,6 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {hasStrokes && (
-              <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                Tersimpan (PNG)
-              </span>
-            )}
             {!disabled && (
               <>
                 <button
@@ -199,6 +282,15 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
 
         {!isMobileFullscreen && renderCanvasArea('h-44 sm:h-48')}
 
+        {shortStrokeHint && !isSignedValid && (
+          <div className="mt-2 p-2.5 rounded-lg bg-amber-50 border border-amber-300 text-xs text-amber-900 font-medium flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
+            <span>
+              Goresan terlalu singkat atau hanya sentuhan biasa. Mohon goreskan tanda tangan lengkap Anda.
+            </span>
+          </div>
+        )}
+
         <p className="mt-2 text-xs text-slate-500">
           Mendukung layar sentuh HP (Android / iPhone) & Mouse · Format PNG Resmi · Terikat pada akun{' '}
           <strong>{signerName}</strong>.
@@ -214,7 +306,7 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
                 Mode Tanda Tangan Layar HP — {signerName}
               </h4>
               <p className="text-xs text-slate-500">
-                Goreskan tanda tangan dengan jari Anda pada kotak putih di bawah ini
+                Goreskan tanda tangan dengan jari Anda pada kotak di bawah ini
               </p>
             </div>
             <button
@@ -242,11 +334,16 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
             </button>
             <button
               type="button"
+              disabled={!isSignedValid}
               onClick={() => setIsMobileFullscreen(false)}
-              className="inline-flex items-center gap-1.5 px-6 py-2.5 text-xs font-semibold text-white bg-emerald-900 hover:bg-emerald-800 rounded-md"
+              className={`inline-flex items-center gap-1.5 px-6 py-2.5 text-xs font-semibold rounded-md transition-colors ${
+                isSignedValid
+                  ? 'text-white bg-emerald-900 hover:bg-emerald-800'
+                  : 'text-slate-400 bg-slate-200 cursor-not-allowed'
+              }`}
             >
               <CheckCircle2 className="w-4 h-4" />
-              Selesai & Gunakan Tanda Tangan Ini
+              {isSignedValid ? 'Selesai & Gunakan Tanda Tangan Ini' : 'Goreskan Tanda Tangan Dulu'}
             </button>
           </div>
         </div>
